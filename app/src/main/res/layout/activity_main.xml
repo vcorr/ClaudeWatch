@@ -11,14 +11,35 @@
         android:layout_height="match_parent"
         app:boxedEdges="all">
 
-        <!-- Idle state -->
-        <Button
-            android:id="@+id/btn_ask"
-            android:layout_width="wrap_content"
+        <!-- Idle state: input + send -->
+        <LinearLayout
+            android:id="@+id/layout_idle"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="Ask Claude"
-            android:textSize="16sp" />
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <EditText
+                android:id="@+id/et_prompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Ask Claude…"
+                android:textColor="@android:color/white"
+                android:textColorHint="@android:color/darker_gray"
+                android:inputType="textShortMessage"
+                android:imeOptions="actionSend"
+                android:maxLines="3" />
+
+            <Button
+                android:id="@+id/btn_send"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Send"
+                android:textSize="14sp" />
+
+        </LinearLayout>
 
         <!-- Loading state -->
         <LinearLayout
@@ -41,6 +62,7 @@
                 android:text="Thinking…"
                 android:textColor="@android:color/white"
                 android:textSize="14sp" />
+
         </LinearLayout>
 
         <!-- Result state -->
@@ -73,6 +95,7 @@
                     android:textSize="13sp" />
 
             </LinearLayout>
+
         </ScrollView>
 
     </FrameLayout>

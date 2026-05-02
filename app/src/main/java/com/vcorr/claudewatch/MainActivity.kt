@@ -1,16 +1,16 @@
 package com.vcorr.claudewatch
 
 import android.app.Activity
-import android.app.RemoteInput
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.wear.input.RemoteInputIntentHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,47 +21,44 @@ class MainActivity : Activity() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private lateinit var btnAsk: Button
+    private lateinit var layoutIdle: LinearLayout
+    private lateinit var etPrompt: EditText
+    private lateinit var btnSend: Button
     private lateinit var layoutLoading: LinearLayout
     private lateinit var layoutResult: ScrollView
     private lateinit var tvResponse: TextView
     private lateinit var btnAgain: Button
 
-    private val inputKey = "prompt"
-    private val requestCodeInput = 1
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        btnAsk = findViewById(R.id.btn_ask)
+        layoutIdle = findViewById(R.id.layout_idle)
+        etPrompt = findViewById(R.id.et_prompt)
+        btnSend = findViewById(R.id.btn_send)
         layoutLoading = findViewById(R.id.layout_loading)
         layoutResult = findViewById(R.id.layout_result)
         tvResponse = findViewById(R.id.tv_response)
         btnAgain = findViewById(R.id.btn_again)
 
-        btnAsk.setOnClickListener { launchInput() }
+        btnSend.setOnClickListener { submit() }
         btnAgain.setOnClickListener { showIdle() }
+
+        etPrompt.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND) { submit(); true } else false
+        }
     }
 
-    private fun launchInput() {
-        val remoteInput = RemoteInput.Builder(inputKey)
-            .setLabel("Ask Claude…")
-            .build()
-        val intent = RemoteInputIntentHelper.createActionRemoteInputIntent()
-        RemoteInputIntentHelper.putRemoteInputsExtra(intent, listOf(remoteInput))
-        @Suppress("DEPRECATION")
-        startActivityForResult(intent, requestCodeInput)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != requestCodeInput || resultCode != RESULT_OK || data == null) return
-        val bundle = RemoteInput.getResultsFromIntent(data) ?: return
-        val prompt = bundle.getCharSequence(inputKey)?.toString() ?: return
+    private fun submit() {
+        val prompt = etPrompt.text.toString().trim()
+        if (prompt.isEmpty()) return
+        hideKeyboard()
         askClaude(prompt)
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(etPrompt.windowToken, 0)
     }
 
     private fun askClaude(prompt: String) {
@@ -82,20 +79,21 @@ class MainActivity : Activity() {
     }
 
     private fun showIdle() {
-        btnAsk.visibility = View.VISIBLE
+        layoutIdle.visibility = View.VISIBLE
         layoutLoading.visibility = View.GONE
         layoutResult.visibility = View.GONE
+        etPrompt.text.clear()
     }
 
     private fun showLoading() {
-        btnAsk.visibility = View.GONE
+        layoutIdle.visibility = View.GONE
         layoutLoading.visibility = View.VISIBLE
         layoutResult.visibility = View.GONE
     }
 
     private fun showResult(text: String) {
         tvResponse.text = text
-        btnAsk.visibility = View.GONE
+        layoutIdle.visibility = View.GONE
         layoutLoading.visibility = View.GONE
         layoutResult.visibility = View.VISIBLE
         layoutResult.scrollTo(0, 0)
