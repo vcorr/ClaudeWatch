@@ -28,7 +28,7 @@ jobs:
         run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon -PCLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

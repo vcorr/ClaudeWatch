@@ -13,6 +13,13 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        val apiKey = project.findProperty("CLAUDE_API_KEY") as String? ?: ""
+        buildConfigField("String", "CLAUDE_API_KEY", "\"$apiKey\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -37,4 +44,5 @@ android {
 
 dependencies {
     implementation("androidx.wear:wear:1.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }
