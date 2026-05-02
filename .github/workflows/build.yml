@@ -1,4 +1,4 @@
-name: Build Debug APK
+name: Build Debug APKs
 
 on:
   push:
@@ -27,12 +27,19 @@ jobs:
       - name: Set ANDROID_HOME
         run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
-      - name: Build debug APK
+      - name: Build debug APKs
         run: ./gradlew assembleDebug --no-daemon -PCLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
 
-      - name: Upload debug APK
+      - name: Upload wear APK
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: wear-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Upload mobile APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-debug-apk
+          path: mobile/build/outputs/apk/debug/mobile-debug.apk
           retention-days: 14
