@@ -56,6 +56,7 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != requestCodeInput || resultCode != RESULT_OK || data == null) return
         val bundle = RemoteInput.getResultsFromIntent(data) ?: return
@@ -71,10 +72,12 @@ class MainActivity : Activity() {
                 showError("API key not set")
                 return@launch
             }
-            ClaudeApi.ask(prompt, apiKey).fold(
-                onSuccess = { showResult(it) },
-                onFailure = { showError(it.message ?: "Error") }
-            )
+            try {
+                val response = ClaudeApi.ask(prompt, apiKey)
+                showResult(response)
+            } catch (e: Exception) {
+                showError(e.message ?: "Error")
+            }
         }
     }
 
