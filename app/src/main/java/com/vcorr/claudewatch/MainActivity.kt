@@ -10,7 +10,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.wear.input.RemoteInputIntentHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,15 +28,7 @@ class MainActivity : Activity() {
     private lateinit var btnAgain: Button
 
     private val inputKey = "prompt"
-
-    private val inputLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != RESULT_OK) return@registerForActivityResult
-        val bundle = RemoteInput.getResultsFromIntent(result.data ?: return@registerForActivityResult)
-        val prompt = bundle?.getCharSequence(inputKey)?.toString() ?: return@registerForActivityResult
-        askClaude(prompt)
-    }
+    private val requestCodeInput = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,7 +50,17 @@ class MainActivity : Activity() {
             .build()
         val intent = RemoteInputIntentHelper.createActionRemoteInputIntent()
         RemoteInputIntentHelper.putRemoteInputsExtra(intent, listOf(remoteInput))
-        inputLauncher.launch(intent)
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, requestCodeInput)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != requestCodeInput || resultCode != RESULT_OK || data == null) return
+        val bundle = RemoteInput.getResultsFromIntent(data) ?: return
+        val prompt = bundle.getCharSequence(inputKey)?.toString() ?: return
+        askClaude(prompt)
     }
 
     private fun askClaude(prompt: String) {
