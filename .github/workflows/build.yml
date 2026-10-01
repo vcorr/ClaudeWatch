@@ -30,7 +30,7 @@ jobs:
         run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
       - name: Build debug APKs
-        run: ./gradlew assembleDebug --no-daemon -PCLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload wear APK
         uses: actions/upload-artifact@v7

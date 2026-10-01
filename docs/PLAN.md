@@ -9,20 +9,21 @@
 - **No local Android build.** This development container cannot reach Google's Maven repository, so every build is proven only by GitHub Actions. Each step keeps CI green. Pure logic lives in a plain Kotlin `core` module with JVM unit tests run in CI. UI is checked with Robolectric screenshot tests, whose PNGs CI uploads.
 - **Only the owner can test on the watch.** Every phase ends with a device checklist. No phase builds on a device assumption that hasn't been verified.
 - **The repository is public.** Anything CI uploads is downloadable, and no secret may ever enter the source or an APK.
-- **Connectivity is unknown.** "Away from the phone" only works if the watch has LTE or Wi-Fi of its own. *Open question 1.*
-- **The watch model is unknown.** ClawWatch reports that Galaxy Watch 4–6 microphones struggle. *Open question 1.*
+- **Connectivity:** Galaxy Watch 9 LTE, but with no mobile plan. Away from the phone it therefore works on known Wi-Fi only; anywhere else it needs the phone within Bluetooth range. Adding an eSIM plan later would remove that limit without any change to the app.
+- **Watch model:** Galaxy Watch 9. ClawWatch's microphone warning concerns the Watch 4–6, so it should not apply, but Phase 1 checks.
+- **Development machine:** a Mac, installing over adb (README).
 - **AGPL:** ClawWatch is a source of ideas only (`CLAWWATCH-NOTES.md`).
 
 ## Phase 0 — Stop the key leak (urgent, alone)
 
-- **Owner, before any code:** rotate the exposed key; delete the old artifacts; create the new key in its own Console workspace with a monthly spending limit.
+- **Owner:** chose to keep the current key for now rather than rotate it. Mitigations: the artifacts that contain it expire 14 days after creation (`retention-days: 14`, so by 15 October 2026); the now-unused `CLAUDE_API_KEY` repository secret can be deleted; a monthly spending limit in the Console is recommended.
 - Remove `-PCLAUDE_API_KEY` from CI and the `BuildConfig` field.
 - The app reads the key from the private file `files/api_key`, trimming whitespace and the trailing newline. If the key is missing, it shows the provisioning command. The owner provisions it from a computer:
   - macOS / Linux: `adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'" < key.txt`
   - PowerShell: `Get-Content key.txt | adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'"`
   - then delete `key.txt`.
   
-  The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. If open question 2 shows APKs are installed from a phone app, check that the app can do `run-as` with stdin before this phase ships.
+  The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. The owner uses a Mac, so the macOS line applies; the README gives the full steps.
 - `android:allowBackup="false"`. Never log the key, request headers, prompts or replies.
 
 *Device checklist:* uninstall the old build (CI still signs with a random key until Phase 2a, so every install until then needs an uninstall and the key provisioned again); install; provision the key; a typed question still gets an answer.
@@ -38,7 +39,7 @@ A diagnostics screen in plain views, so it doesn't wait for the Compose work, in
 
 No public API reads the always-on display setting, so the owner reports it alongside the screenshots.
 
-The owner runs it twice, once with the phone's Bluetooth off, and sends screenshots along with the answers to the open questions. (Installing it needs the same uninstall and key provisioning as Phase 0.) That settles the speech route and whether away-from-phone use is possible.
+The owner runs it twice, once with the phone's Bluetooth off and the watch on Wi-Fi, and sends screenshots, noting whether always-on display is on. (Installing it needs the same uninstall and key provisioning as Phase 0.) That settles the speech route and confirms the app works over the watch's own Wi-Fi.
 
 ## Phase 2 — Foundations (signing, tests, Compose)
 
@@ -151,7 +152,8 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | Phone companion | Cut; `mobile` kept as an API test harness | One user with ADB doesn't need it |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
-## Open questions for the owner
+## Owner's answers (1 October 2026)
 
-1. Does the watch have LTE or its own Wi-Fi, and which Galaxy Watch model is it?
-2. How are APKs installed today: ADB from a computer, or an app on the phone?
+1. Galaxy Watch 9 LTE, with no mobile plan.
+2. adb from a Mac.
+3. Keep the current API key for now.

@@ -12,13 +12,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-
-        val apiKey = project.findProperty("CLAUDE_API_KEY") as String? ?: ""
-        buildConfigField("String", "CLAUDE_API_KEY", "\"$apiKey\"")
-    }
-
-    buildFeatures {
-        buildConfig = true
     }
 
     buildTypes {

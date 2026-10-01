@@ -82,9 +82,9 @@ class MainActivity : AppCompatActivity() {
     private fun askClaude(prompt: String) {
         showLoading()
         scope.launch {
-            val apiKey = BuildConfig.CLAUDE_API_KEY
-            if (apiKey.isBlank()) {
-                showError("API key not set")
+            val apiKey = ApiKeyStore.read(this@MainActivity)
+            if (apiKey == null) {
+                showError("No API key. Set it with adb (see README).")
                 return@launch
             }
             try {
