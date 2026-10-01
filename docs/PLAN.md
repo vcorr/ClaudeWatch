@@ -7,92 +7,125 @@
 ## Constraints that shape the plan
 
 - **No local Android build.** This development container cannot reach Google's Maven repository, so every build is proven only by GitHub Actions. Each step keeps CI green. Pure logic lives in a plain Kotlin `core` module with JVM unit tests run in CI. UI is checked with Robolectric screenshot tests, whose PNGs CI uploads.
-- **Only the owner can test on the watch.** Every phase ends with a device checklist. No phase builds on a device assumption the previous phase hasn't verified.
+- **Only the owner can test on the watch.** Every phase ends with a device checklist. No phase builds on a device assumption that hasn't been verified.
 - **The repository is public.** Anything CI uploads is downloadable, and no secret may ever enter the source or an APK.
-- **Connectivity is unknown.** "Away from the phone" only works if the watch has LTE or Wi-Fi of its own; a Bluetooth-only watch has no network out of phone range. *Open question for the owner.*
-- **The watch model is unknown.** ClawWatch reports that Galaxy Watch 4–6 microphones struggle. *Open question for the owner.*
+- **Connectivity is unknown.** "Away from the phone" only works if the watch has LTE or Wi-Fi of its own. *Open question 1.*
+- **The watch model is unknown.** ClawWatch reports that Galaxy Watch 4–6 microphones struggle. *Open question 1.*
 - **AGPL:** ClawWatch is a source of ideas only (`CLAWWATCH-NOTES.md`).
 
-## Phase 0a — Stop the key leak (urgent, its own change)
+## Phase 0 — Stop the key leak (urgent, alone)
 
-- **Owner, before any code:** rotate the exposed key, delete the old artifacts, and create the new key in its own Console workspace with a monthly spending limit.
+- **Owner, before any code:** rotate the exposed key; delete the old artifacts; create the new key in its own Console workspace with a monthly spending limit.
 - Remove `-PCLAUDE_API_KEY` from CI and the `BuildConfig` field.
-- The app reads the key from a private file `files/api_key`. The owner provisions it with `adb shell run-as com.vcorr.claudewatch sh -c 'cat > files/api_key' < key.txt`: debug builds allow `run-as`, there is no exported entry point, and the key never appears in a command line. If the key is missing, the app shows how to set it.
-- `android:allowBackup="false"`; never log the key, request headers, prompts or replies.
+- The app reads the key from the private file `files/api_key`, trimming whitespace and the trailing newline. If the key is missing, it shows the provisioning command. The owner provisions it from a computer:
+  - macOS / Linux: `adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'" < key.txt`
+  - PowerShell: `Get-Content key.txt | adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'"`
+  - then delete `key.txt`.
+  
+  The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. If open question 2 shows APKs are installed from a phone app, check that the app can do `run-as` with stdin before this phase ships.
+- `android:allowBackup="false"`. Never log the key, request headers, prompts or replies.
 
-*Device checklist:* install, provision the key, confirm a typed question still gets an answer.
+*Device checklist:* install; provision the key; a typed question still gets an answer.
 
-## Phase 0b — Builds that install over each other, and tests
+## Phase 1 — Device probe
 
-- **Stable signing:** a keystore stored as base64 CI secrets and used for debug builds of both modules. CI falls back to default debug signing when the secrets are absent (forks, Dependabot) so builds stay green. The owner keeps an offline backup of the keystore; losing it forces an uninstall, which wipes chats and the key. The first stable-signed install needs one uninstall.
-- `versionCode` from `GITHUB_RUN_NUMBER`, so builds can be told apart.
-- New `core` module (plain Kotlin, no Android): API request builder, reply parsing, history trimming, and later the SSE parser and sentence splitter. Uses kotlinx-serialization instead of `org.json`, which can't run in JVM unit tests. CI runs the unit tests.
-- The `mobile` module becomes a thin phone test harness over `core`, useful for trying the voice loop on a phone; it is never shipped.
-
-## Phase 0c — Compose for Wear OS (its own change)
-
-- Rebuild the one existing screen in Compose for Wear OS Material 3, with the `org.jetbrains.kotlin.plugin.compose` plugin pinned to the same 2.4.20 as Kotlin, and library versions pinned in the catalogue.
-- Robolectric + Roborazzi screenshot tests of each screen state, uploaded by CI. These replace the local previews we can't run.
-
-*Device checklist (0b+0c):* uninstall once; install; provision the key; ask a typed question; install the next CI build over it and confirm the key survived.
-
-## Phase 1a — Device probe
-
-A diagnostics screen in the same APK. The manifest declares `<queries>` for `android.speech.RecognitionService` and `android.intent.action.TTS_SERVICE`, because otherwise API 30+ hides them and the probe reports false negatives. The probe asks for microphone permission first, then reports:
+A diagnostics screen in plain views, so it doesn't wait for the Compose work, in the same APK. The manifest declares `<queries>` for `android.speech.RecognitionService` and `android.intent.action.TTS_SERVICE`; without them API 30+ hides both and the probe reports false negatives. The probe requests microphone permission first, then reports:
 - `SpeechRecognizer.isRecognitionAvailable`, the on-device variant, and the recognition services it can see;
 - whether `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` resolves, and to which app;
 - the TTS engines and voices;
 - a 5-second microphone test through each speech route, with a live transcript;
-- one tiny API call's round-trip time and the active network transport (Bluetooth via phone, Wi-Fi or LTE).
+- one tiny API call's round-trip time and the active network transport (Bluetooth via phone, Wi-Fi or LTE);
+- whether always-on display is enabled.
 
-The owner runs it twice, once with the phone's Bluetooth off, and sends screenshots. That settles the speech route and whether away-from-phone use is possible.
+The owner runs it twice, once with the phone's Bluetooth off, and sends screenshots along with the answers to the open questions. That settles the speech route and whether away-from-phone use is possible.
 
-## Phase 1b — Hands-free voice loop
+## Phase 2 — Foundations (signing, tests, Compose)
 
-- A `SpeechInput` interface with two implementations: `SpeechRecognizer` (in-app, with live partial transcript) and `RecognizerIntent` (system dialog, relaunched automatically after each reply; the dialog's own silence timeout acts as the follow-up window). The probe's result picks the default. Vosk only if both fail.
-- The state machine: IDLE → LISTENING → THINKING → SPEAKING. A tap interrupts at any point, and each turn carries a token so stale callbacks are ignored. After the reply finishes speaking (TTS `onDone` for the final utterance), a 3.5-second follow-up window opens with a visible countdown.
+Two separate CI changes, so a Compose problem can't hold up the rest.
+
+**2a. Signing and tests**
+- **Stable signing:** a keystore stored as base64 CI secrets, used for debug builds of both modules. When the secrets are absent (forks, Dependabot), CI falls back to default debug signing so builds stay green. The owner keeps an offline backup of the keystore; losing it forces an uninstall, which wipes chats and the key. The first stable-signed install needs one uninstall and a fresh key provisioning.
+- `versionCode` from `GITHUB_RUN_NUMBER`.
+- New `core` module, plain Kotlin with no Android: request builder, reply parsing, history trimming, and later the SSE parser and sentence splitter. It applies `org.jetbrains.kotlin.jvm` *without a version*, because the root buildscript already puts KGP 2.4.20 on the classpath and a versioned plugin request fails. It applies `org.jetbrains.kotlin.plugin.serialization` at exactly 2.4.20, depends on `kotlinx-serialization-json`, and targets JVM 17. CI runs its unit tests.
+- The `mobile` module stays as a typed-question **API test harness** over `core`, as it is today. The voice code is Android code inside `app`, so it is not a voice harness.
+
+**2b. Compose for Wear OS**
+- Rebuild the question screen in Compose for Wear OS Material 3. The `org.jetbrains.kotlin.plugin.compose` plugin is pinned to 2.4.20 to match Kotlin, and library versions are pinned in the catalogue.
+- Robolectric + Roborazzi screenshot tests of each screen state, with `@Config(sdk = …)` pinned to a level the chosen Robolectric version supports and a round-watch qualifier. CI uploads the PNGs.
+
+*Device checklist:* uninstall once; install; provision the key; ask a question; install the next CI build over it and confirm the key survived.
+
+## Phase 3 — Hands-free voice loop
+
+- A `SpeechInput` interface with two implementations, defaulting to whichever the probe chose:
+  - `SpeechRecognizer`: in-app, with a live partial transcript;
+  - `RecognizerIntent`: the system dialog, relaunched automatically after each reply, with the dialog's own silence timeout acting as the follow-up window.
+  
+  Vosk is used only if both fail.
+- **State machine:** IDLE → LISTENING → THINKING → SPEAKING.
+  - A tap interrupts at any point.
+  - Each turn carries a token, so stale callbacks are ignored.
+  - After TTS `onDone` for the final utterance, a 3.5-second follow-up window opens with a visible countdown (on the `SpeechRecognizer` route).
 - **Launching the app goes straight into listening.** With the side button's double press mapped to the app, this is the Gemini-like gesture.
-- Haptic tick when listening starts and stops. The microphone opens about 200 ms after speech ends, so it doesn't hear Claude's last word.
-- Haiku 4.5, `max_tokens` 1,024 (brevity comes from the prompt; a reply that hits the cap is spoken up to its last full sentence), spoken-style system prompt. In-memory conversation.
+- Haptic tick when listening starts and stops. The microphone opens about 200 ms after speech ends, so it doesn't catch the tail of Claude's reply.
+- **Model:** Haiku 4.5 with `max_tokens` 1,024. Brevity comes from the spoken-style prompt. A reply that hits the cap is spoken up to its last full sentence. Reply *length* (never content) is logged, to check replies stay short before streaming arrives.
+- In-memory conversation.
 
 *Device checklist:* a five-turn conversation without touching the screen after launch; interrupt Claude mid-sentence; let the follow-up window lapse.
 
-## Phase 1c — Survive the wrist dropping
+## Phase 4 — Survive the wrist dropping
 
-People lower their wrist to listen, which turns the screen off. The activity stops and the watch face returns.
-- Support ambient mode (`AmbientLifecycleObserver`) so the app stays the visible activity.
-- Run each turn's speech output in a foreground service of type `mediaPlayback`, tied to an Ongoing Activity, so a reply keeps playing with the wrist down.
-- The microphone opens only while the app is visible. Follow-up listening with the wrist down is attempted only through a `microphone`-type foreground service started while the app was visible; that is verified on the device, not assumed.
+Lowering the wrist to listen turns the screen off; the activity stops and the watch face returns.
 
-*Device checklist:* drop the wrist mid-reply, and the reply finishes; raise it, and the conversation carries on.
+**Ambient mode.** Use `AmbientLifecycleObserver`. Ambient mode only exists with always-on display enabled. Wear OS 6 apps targeting SDK 36 are treated as always-on ([Android docs](https://developer.android.com/training/wearables/views/always-on)). Samsung's default for always-on display is unverified.
 
-## Phase 2 — Conversations that persist
+**One foreground service per turn.**
+- Type `mediaPlayback|microphone`, tied to an Ongoing Activity.
+- Start it when the turn begins, while the app is visible and `RECORD_AUDIO` is granted. Starting it from the background is blocked on Android 12+, and starting the microphone type without the permission throws.
+- Stop it when the app returns to IDLE.
+- Declare `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_MICROPHONE`; request `POST_NOTIFICATIONS`.
 
-- One JSON file per conversation, written with `AtomicFile` so a crash can't corrupt it; reopen the latest on launch; "New chat" and "Delete all chats".
+**What happens with the wrist down depends on the speech route.**
+- *`SpeechRecognizer`:* the reply finishes, and follow-up listening continues inside the service.
+- *`RecognizerIntent`:* the reply finishes, then the app goes to IDLE. Android 10+ won't launch the dialog from the background, even with a foreground service. Listening resumes when the wrist comes up or the screen is tapped.
+
+*Device checklist:* with always-on display on, and again with it off (including the return-to-watch-face timeout):
+- drop the wrist mid-reply, and the reply finishes;
+- raise the wrist, and the conversation carries on.
+
+## Phase 5 — Conversations that persist
+
+- One JSON file per conversation, written with `AtomicFile`; reopen the latest on launch; "New chat" and "Delete all chats".
 - History sent each turn is trimmed in user/assistant *pairs*, always starting with a user message.
 - Scrollable transcript with rotary-crown scrolling; replies stored in full.
-- Errors: one retry after `retry-after` on 429/529; plain messages for no network, bad key, out of credit.
-- Model setting on the watch (Haiku 4.5 default, Sonnet 5.5 option).
-- **Decision:** keep our own HTTP client. The official `anthropic-java` SDK is not documented for Android and brings Jackson, R8 rules and size. Our client is small and fully unit-testable. This departs from Anthropic's usual "use the SDK" advice, deliberately.
+- **Errors:** one retry after `retry-after` on 429/529; plain messages for no network, bad key and out of credit.
+- Model setting on the watch: Haiku 4.5 by default, Sonnet 5.5 as an option.
+- **Decision:** keep our own HTTP client. The official `anthropic-java` SDK is not documented for Android and brings Jackson, R8 rules and size, while our client is small and fully unit-testable. This departs from Anthropic's usual "use the SDK" advice, deliberately.
 
-*Device checklist:* chat, force-stop, reopen, carry on; new chat; scroll a long reply with the crown; airplane mode gives a clear message.
+*Device checklist:*
+- chat, force-stop, reopen and carry on;
+- start a new chat;
+- scroll a long reply with the crown;
+- airplane mode gives a clear message.
 
-## Phase 3 — Faster replies
+## Phase 6 — Faster replies
 
-- Stream the reply (server-sent events); give each complete sentence to TTS with `QUEUE_ADD` and its own utterance ID; the follow-up window starts on `onDone` of the final ID.
-- Request audio focus (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) while speaking; abandon it before listening.
+- Stream the reply (server-sent events). Each complete sentence goes to TTS with `QUEUE_ADD` and its own utterance ID. The follow-up window starts on `onDone` of the final ID.
+- Audio focus (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) while speaking, abandoned before listening.
 - Interrupting calls `tts.stop()`, cancels the job and disconnects the request.
 - Unit tests for the SSE parser and the sentence splitter (abbreviations, decimals, "e.g.").
-- Measure the time from end of speech to first spoken word, before and after, on the device.
+- Measure end-of-speech to first spoken word on the device, before and after.
 
-*Device checklist:* first words arrive noticeably sooner than in Phase 2; interrupting mid-stream stops both the speech and the network request.
+*Device checklist:* first words arrive noticeably sooner than in Phase 5; interrupting mid-stream stops both the speech and the request.
 
-## Phase 4 — Quick access
+## Phase 7 — Quick access
 
 - A tile with a "Talk" button.
 - README instructions for mapping the side button's double press to the app.
 
-## Phase 5 — Optional extras (each stands alone)
+*Device checklist:* double press → speak → answer; Talk tile → listening.
+
+## Phase 8 — Optional extras (each stands alone)
 
 - Web search through Claude's server-side search tool.
 - Experiment: can the app be chosen as the default assistant and launched by holding the side button?
@@ -103,13 +136,13 @@ People lower their wrist to listen, which turns the screen off. The activity sto
 
 | Decision | Choice | Why |
 |---|---|---|
-| Key handling | Private file, provisioned with `run-as`; never in source or APK | Public repo; no exported surface |
-| Speech in | `SpeechInput` interface: `SpeechRecognizer` or `RecognizerIntent`, chosen by the probe; Vosk last | `RecognizerIntent` is the documented Wear OS route; `SpeechRecognizer` has a known Galaxy Watch 4 failure ([flutter#130576](https://github.com/flutter/flutter/issues/130576)) |
-| Model | Haiku 4.5 default, `max_tokens` 1,024 | Fastest and cheapest ($1 / $5 per million input / output tokens); brevity from the prompt, not the cap |
+| Key handling | Private file via `run-as` and stdin; never in source or APK | Public repo; no exported surface |
+| Speech in | `SpeechInput`: `SpeechRecognizer` or `RecognizerIntent`, chosen by the probe; Vosk last | `RecognizerIntent` is the documented Wear OS route; `SpeechRecognizer` has a known Galaxy Watch 4 failure ([flutter#130576](https://github.com/flutter/flutter/issues/130576)) |
+| Model | Haiku 4.5, `max_tokens` 1,024 | Fastest and cheapest ($1 / $5 per million input / output tokens); brevity from the prompt, not the cap |
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
-| UI | Compose for Wear OS Material 3, Phase 0c | Recommended toolkit; screenshot-tested in CI |
-| Phone companion | Cut | One user with ADB doesn't need it |
+| UI | Compose for Wear OS Material 3 (Phase 2b); probe in plain views | Recommended toolkit; screenshot-tested in CI; probe not held up |
+| Phone companion | Cut; `mobile` kept as an API test harness | One user with ADB doesn't need it |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
 ## Open questions for the owner
