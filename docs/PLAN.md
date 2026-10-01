@@ -25,7 +25,7 @@
   The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. If open question 2 shows APKs are installed from a phone app, check that the app can do `run-as` with stdin before this phase ships.
 - `android:allowBackup="false"`. Never log the key, request headers, prompts or replies.
 
-*Device checklist:* install; provision the key; a typed question still gets an answer.
+*Device checklist:* uninstall the old build (CI still signs with a random key until Phase 2a, so every install until then needs an uninstall and the key provisioned again); install; provision the key; a typed question still gets an answer.
 
 ## Phase 1 — Device probe
 
@@ -34,10 +34,11 @@ A diagnostics screen in plain views, so it doesn't wait for the Compose work, in
 - whether `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` resolves, and to which app;
 - the TTS engines and voices;
 - a 5-second microphone test through each speech route, with a live transcript;
-- one tiny API call's round-trip time and the active network transport (Bluetooth via phone, Wi-Fi or LTE);
-- whether always-on display is enabled.
+- one tiny API call's round-trip time and the active network transport (Bluetooth via phone, Wi-Fi or LTE).
 
-The owner runs it twice, once with the phone's Bluetooth off, and sends screenshots along with the answers to the open questions. That settles the speech route and whether away-from-phone use is possible.
+No public API reads the always-on display setting, so the owner reports it alongside the screenshots.
+
+The owner runs it twice, once with the phone's Bluetooth off, and sends screenshots along with the answers to the open questions. (Installing it needs the same uninstall and key provisioning as Phase 0.) That settles the speech route and whether away-from-phone use is possible.
 
 ## Phase 2 — Foundations (signing, tests, Compose)
 
@@ -59,7 +60,7 @@ Two separate CI changes, so a Compose problem can't hold up the rest.
 
 - A `SpeechInput` interface with two implementations, defaulting to whichever the probe chose:
   - `SpeechRecognizer`: in-app, with a live partial transcript;
-  - `RecognizerIntent`: the system dialog, relaunched automatically after each reply, with the dialog's own silence timeout acting as the follow-up window.
+  - `RecognizerIntent`: the system dialog, relaunched automatically after each reply, with the dialog's own silence timeout acting as the follow-up window. A `RESULT_CANCELED` or empty result ends the loop and returns to IDLE.
   
   Vosk is used only if both fail.
 - **State machine:** IDLE → LISTENING → THINKING → SPEAKING.
@@ -68,6 +69,7 @@ Two separate CI changes, so a Compose problem can't hold up the rest.
   - After TTS `onDone` for the final utterance, a 3.5-second follow-up window opens with a visible countdown (on the `SpeechRecognizer` route).
 - **Launching the app goes straight into listening.** With the side button's double press mapped to the app, this is the Gemini-like gesture.
 - Haptic tick when listening starts and stops. The microphone opens about 200 ms after speech ends, so it doesn't catch the tail of Claude's reply.
+- Audio focus (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) while speaking, abandoned before listening. Interrupting calls `tts.stop()` and cancels the request.
 - **Model:** Haiku 4.5 with `max_tokens` 1,024. Brevity comes from the spoken-style prompt. A reply that hits the cap is spoken up to its last full sentence. Reply *length* (never content) is logged, to check replies stay short before streaming arrives.
 - In-memory conversation.
 
@@ -79,18 +81,19 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 
 **Ambient mode.** Use `AmbientLifecycleObserver`. Ambient mode only exists with always-on display enabled. Wear OS 6 apps targeting SDK 36 are treated as always-on ([Android docs](https://developer.android.com/training/wearables/views/always-on)). Samsung's default for always-on display is unverified.
 
-**One foreground service per turn.**
+**One foreground service per conversation session.**
 - Type `mediaPlayback|microphone`, tied to an Ongoing Activity.
-- Start it when the turn begins, while the app is visible and `RECORD_AUDIO` is granted. Starting it from the background is blocked on Android 12+, and starting the microphone type without the permission throws.
+- Start it on the session's first turn, while the app is visible and `RECORD_AUDIO` is granted. Keep it running across turns, because later turns may begin with the wrist down, where starting a service is blocked on Android 12+. Starting the microphone type without the permission throws.
 - Stop it when the app returns to IDLE.
 - Declare `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_MICROPHONE`; request `POST_NOTIFICATIONS`.
 
 **What happens with the wrist down depends on the speech route.**
-- *`SpeechRecognizer`:* the reply finishes, and follow-up listening continues inside the service.
+- *`SpeechRecognizer`:* the reply finishes, and follow-up listening is *attempted* inside the service. This is verified on the device, not assumed. If the recogniser refuses in the background, the app falls back to the `RecognizerIntent` behaviour below.
 - *`RecognizerIntent`:* the reply finishes, then the app goes to IDLE. Android 10+ won't launch the dialog from the background, even with a foreground service. Listening resumes when the wrist comes up or the screen is tapped.
 
 *Device checklist:* with always-on display on, and again with it off (including the return-to-watch-face timeout):
 - drop the wrist mid-reply, and the reply finishes;
+- with the wrist down, speak a follow-up and hear the answer (`SpeechRecognizer` route only);
 - raise the wrist, and the conversation carries on.
 
 ## Phase 5 — Conversations that persist
@@ -99,7 +102,11 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 - History sent each turn is trimmed in user/assistant *pairs*, always starting with a user message.
 - Scrollable transcript with rotary-crown scrolling; replies stored in full.
 - **Errors:** one retry after `retry-after` on 429/529; plain messages for no network, bad key and out of credit.
-- Model setting on the watch: Haiku 4.5 by default, Sonnet 5.5 as an option.
+- Model setting on the watch: Haiku 4.5 by default, Sonnet 5.5 as an option. For Sonnet 5.5, which by the Claude API reference rejects `thinking: {type: "disabled"}` and non-default sampling with a 400:
+  - send `thinking: {type: "between_tools"}` to keep thinking off for latency;
+  - send no `temperature`.
+- Robust replies: `core` takes the first `text` block, not `content[0]`, and the SSE parser ignores non-text deltas, because a response may begin with a `thinking` block. Both are unit-tested.
+- `stop_reason: "refusal"` gets a spoken plain-language message. History is append-only; earlier turns are never edited.
 - **Decision:** keep our own HTTP client. The official `anthropic-java` SDK is not documented for Android and brings Jackson, R8 rules and size, while our client is small and fully unit-testable. This departs from Anthropic's usual "use the SDK" advice, deliberately.
 
 *Device checklist:*
@@ -111,8 +118,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 ## Phase 6 — Faster replies
 
 - Stream the reply (server-sent events). Each complete sentence goes to TTS with `QUEUE_ADD` and its own utterance ID. The follow-up window starts on `onDone` of the final ID.
-- Audio focus (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) while speaking, abandoned before listening.
-- Interrupting calls `tts.stop()`, cancels the job and disconnects the request.
+- Interrupting mid-stream also cancels the stream and disconnects the request (audio focus and `tts.stop()` already exist from Phase 3).
 - Unit tests for the SSE parser and the sentence splitter (abbreviations, decimals, "e.g.").
 - Measure end-of-speech to first spoken word on the device, before and after.
 
