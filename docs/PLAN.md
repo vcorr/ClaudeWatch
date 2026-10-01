@@ -106,7 +106,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
   - send `thinking: {type: "between_tools"}` to keep thinking off for latency;
   - send no `temperature`.
 - Robust replies: `core` takes the first `text` block, not `content[0]`, and the SSE parser ignores non-text deltas, because a response may begin with a `thinking` block. Both are unit-tested.
-- `stop_reason: "refusal"` gets a spoken plain-language message. History is append-only; earlier turns are never edited.
+- `stop_reason: "refusal"` gets a spoken plain-language message. Stored turns are never rewritten; trimming only drops whole oldest pairs from what is sent.
 - **Decision:** keep our own HTTP client. The official `anthropic-java` SDK is not documented for Android and brings Jackson, R8 rules and size, while our client is small and fully unit-testable. This departs from Anthropic's usual "use the SDK" advice, deliberately.
 
 *Device checklist:*
