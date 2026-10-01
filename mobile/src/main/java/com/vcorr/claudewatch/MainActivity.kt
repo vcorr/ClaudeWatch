@@ -11,6 +11,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        applyWindowInsets(findViewById(R.id.root))
 
         layoutIdle = findViewById(R.id.layout_idle)
         etPrompt = findViewById(R.id.et_prompt)
@@ -46,6 +49,21 @@ class MainActivity : AppCompatActivity() {
 
         etPrompt.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) { submit(); true } else false
+        }
+    }
+
+    // Targeting API 35+ makes the window edge-to-edge, so pad for the system bars and keyboard ourselves.
+    private fun applyWindowInsets(root: View) {
+        val left = root.paddingLeft
+        val top = root.paddingTop
+        val right = root.paddingRight
+        val bottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(left + insets.left, top + insets.top, right + insets.right, bottom + insets.bottom)
+            WindowInsetsCompat.CONSUMED
         }
     }
 
