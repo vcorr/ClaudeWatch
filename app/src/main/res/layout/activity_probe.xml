@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.wear.widget.BoxInsetLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <ScrollView
+        android:id="@+id/probe_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:boxedEdges="all">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btn_probe_listen"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Test in-app listening"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_probe_dialog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Test system dialog"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_probe_speak"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Test speaking"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tv_probe_log"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="@android:color/white"
+                android:textIsSelectable="true"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+    </ScrollView>
+
+</androidx.wear.widget.BoxInsetLayout>

@@ -60,6 +60,9 @@ class MainActivity : Activity() {
 
         btnSend.setOnClickListener { submit() }
         btnAgain.setOnClickListener { showIdle() }
+        findViewById<Button>(R.id.btn_probe).setOnClickListener {
+            startActivity(android.content.Intent(this, ProbeActivity::class.java))
+        }
 
         etPrompt.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) { submit(); true } else false

@@ -14,7 +14,7 @@
 - **Development machine:** a Mac, installing over adb (README).
 - **AGPL:** ClawWatch is a source of ideas only (`CLAWWATCH-NOTES.md`).
 
-## Phase 0 — Stop the key leak (urgent, alone)
+## Phase 0 — Stop the key leak (urgent, alone) ✅ done 2 Oct 2026
 
 - **Owner:** chose to keep the current key for now rather than rotate it. Mitigations: the artifacts that contain it expire 14 days after creation (`retention-days: 14`, so by 15 October 2026); the now-unused `CLAUDE_API_KEY` repository secret can be deleted; a monthly spending limit in the Console is recommended.
 - Remove `-PCLAUDE_API_KEY` from CI and the `BuildConfig` field.
