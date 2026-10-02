@@ -17,4 +17,3 @@ dependencyResolutionManagement {
 rootProject.name = "ClaudeWatch"
 include(":app")
 include(":core")
-include(":mobile")

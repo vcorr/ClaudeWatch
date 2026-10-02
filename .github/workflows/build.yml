@@ -1,4 +1,4 @@
-name: Build Debug APKs
+name: Build watch APK
 
 on:
   push:
@@ -29,29 +29,24 @@ jobs:
       - name: Set ANDROID_HOME
         run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
-      - name: Build debug APKs
-        run: ./gradlew :core:test assembleDebug --no-daemon
+      - name: Work out the version
+        run: echo "VERSION=$(grep '^claudewatch.version=' gradle.properties | cut -d= -f2).${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
 
-      - name: Inspect APKs
+      - name: Test and build
+        run: ./gradlew :core:test :app:assembleDebug --no-daemon
+
+      - name: Name the APK after the version
+        run: cp app/build/outputs/apk/debug/app-debug.apk "ClaudeWatch-$VERSION.apk"
+
+      - name: Inspect APK
         run: |
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          for apk in app/build/outputs/apk/debug/app-debug.apk mobile/build/outputs/apk/debug/mobile-debug.apk; do
-            echo "== $apk"
-            "$BT/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|minSdkVersion|targetSdkVersion|uses-feature|native-code|application-debuggable|testOnly)" || true
-            "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -iE "testOnly|extractNativeLibs|required" || true
-            "$BT/apksigner" verify --verbose --print-certs "$apk" | grep -E "^Verified using|certificate SHA-256" || true
-          done
+          "$BT/aapt2" dump badging "ClaudeWatch-$VERSION.apk" | grep -E "^(package|sdkVersion|minSdkVersion|targetSdkVersion|uses-feature|application-debuggable|testOnly)" || true
+          "$BT/apksigner" verify --verbose --print-certs "ClaudeWatch-$VERSION.apk" | grep -E "^Verified using v2|certificate SHA-256" || true
 
-      - name: Upload wear APK
+      - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: wear-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-
-      - name: Upload mobile APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: mobile-debug-apk
-          path: mobile/build/outputs/apk/debug/mobile-debug.apk
+          name: ClaudeWatch-${{ env.VERSION }}
+          path: ClaudeWatch-${{ env.VERSION }}.apk
           retention-days: 14

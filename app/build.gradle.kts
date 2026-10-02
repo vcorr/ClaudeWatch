@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// ClaudeWatch-<claudewatch.version>.<CI build number>; the build number also orders updates.
+val baseVersion = providers.gradleProperty("claudewatch.version").get()
+val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+
 android {
     namespace = "com.vcorr.claudewatch"
     compileSdk = 36
@@ -10,8 +14,8 @@ android {
         applicationId = "com.vcorr.claudewatch"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber ?: 1
+        versionName = "$baseVersion.${buildNumber ?: 0}"
     }
 
     buildTypes {
@@ -40,5 +44,4 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.wear)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.play.services.wearable)
 }

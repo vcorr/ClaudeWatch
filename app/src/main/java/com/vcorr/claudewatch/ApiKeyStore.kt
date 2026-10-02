@@ -7,8 +7,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * The API key lives in a private file on the device, never in the APK. It arrives from the phone
- * app over the Wearable Data Layer, or over adb (see README).
+ * The API key lives in a private file on the device, never in the APK. It arrives through the
+ * key setup page (KeySetupServer) or over adb (see README).
  */
 object ApiKeyStore {
 

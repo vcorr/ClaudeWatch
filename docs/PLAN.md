@@ -2,7 +2,7 @@
 
 **Goal:** a Claude voice chat on a Samsung Galaxy Watch, for carrying on a conversation when the phone and computer are out of reach. Speak, hear Claude answer, keep going hands-free. English only. One user, sideloaded; no Play Store release.
 
-**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents, health data or avatars; a phone companion beyond sending the API key.
+**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents, health data or avatars; a phone companion app.
 
 ## Constraints that shape the plan
 
@@ -51,7 +51,7 @@ Two separate CI changes, so a Compose problem can't hold up the rest.
 - **Stable signing:** a keystore stored as base64 CI secrets, used for debug builds of both modules. When the secrets are absent (forks, Dependabot), CI falls back to default debug signing so builds stay green. The owner keeps an offline backup of the keystore; losing it forces an uninstall, which wipes chats and the key. The first stable-signed install needs one uninstall and a fresh key provisioning.
 - `versionCode` from `GITHUB_RUN_NUMBER`.
 - New `core` module, plain Kotlin with no Android: request builder, reply parsing, history trimming, and later the SSE parser and sentence splitter. It applies `org.jetbrains.kotlin.jvm` *without a version*, because the root buildscript already puts KGP 2.4.20 on the classpath and a versioned plugin request fails. It applies `org.jetbrains.kotlin.plugin.serialization` at exactly 2.4.20, depends on `kotlinx-serialization-json`, and targets JVM 17. CI runs its unit tests.
-- The `mobile` module stays as a typed-question **API test harness** over `core`, as it is today. The voice code is Android code inside `app`, so it is not a voice harness.
+- The `mobile` phone app was removed on 2 Oct 2026; the browser key page made it unnecessary.
 
 **2b. Compose for Wear OS**
 - Rebuild the question screen in Compose for Wear OS Material 3. The `org.jetbrains.kotlin.plugin.compose` plugin is pinned to 2.4.20 to match Kotlin, and library versions are pinned in the catalogue.
@@ -153,8 +153,9 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Views for now; Compose for Wear OS Material 3 after Phase 3 | Voice first; the voice screen is small, so rebuilding it later is cheap |
-| Phone companion | Key entry only: the `mobile` app sends the key to the watch over the Data Layer (`MessageClient`, not `DataClient`, so it isn't stored or replicated); `mobile` otherwise stays an API test harness | Owner wants setup without a computer (2 Oct 2026), which removes the premise for cutting it |
-| Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); phone app and adb remain alternatives | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
+| Phone companion | Removed (2 Oct 2026), with the watch's Data Layer listener | The browser key page replaced it, and Android's unverified-developer block made sideloading it wait 24 hours |
+| Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); adb remains an alternative | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
+| Versioning | `ClaudeWatch-<claudewatch.version>.<CI build number>` (e.g. 0.3.41) for the artifact, the APK file, `versionName` and the Test screen; `versionCode` is the build number | One name to match a download to what's on the watch; rising codes let Android treat builds as updates |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
 ## Owner's answers (1 October 2026)

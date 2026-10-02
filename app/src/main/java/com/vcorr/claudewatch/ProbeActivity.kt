@@ -63,6 +63,8 @@ class ProbeActivity : Activity() {
     // ── Static checks ───────────────────────────────────────
 
     private fun runChecks() {
+        val version = packageManager.getPackageInfo(packageName, 0).versionName
+        log("ClaudeWatch $version")
         log("${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         val micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         log("Mic permission: ${if (micGranted) "granted" else "DENIED"}")
