@@ -2,20 +2,21 @@
 
 A Claude voice chat for Wear OS, built for a Samsung Galaxy Watch. Work in progress: see [`docs/PLAN.md`](docs/PLAN.md).
 
-The app needs your own Anthropic API key. The key is **never** built into the app; you send it to the watch once, from the phone app (or over adb from a computer).
+The app needs your own Anthropic API key. The key is **never** built into the app; you give it to the watch once, from the phone's browser (or over adb from a computer).
 
 ## Install from the phone (no computer)
 
-Both APKs must come from **the same Actions run**: the phone app can only talk to the watch app when both are signed with the same key, and each run currently signs with its own.
+1. **Watch:** Settings → About watch → Software information, tap **Software version** five times. Then **Settings → Developer options**: turn on **ADB debugging** and **Wireless debugging**. Put the watch on the same Wi-Fi as the phone.
+2. **Phone:** in the browser, signed in to GitHub, open the latest successful run on the [Actions page](../../actions), download `wear-debug-apk` and unzip it with My Files.
+3. Install a phone ADB app such as **Bugjaeger** or **Wear Installer 2**. Connect it to the watch's IP address (shown under Wireless debugging), pair with the code the watch shows, tap *Always allow* on the watch, and install `app-debug.apk` *through that app*. Installs over ADB are exempt from Google's unverified-developer block, so there's no waiting period.
+4. **Key:** open ClaudeWatch on the watch. With no key set, it shows an address such as `http://192.168.1.23:8080` and a six-digit PIN. Open that address in the phone's browser, paste the API key and the PIN, and tap **Save to watch**. The watch confirms and the page closes itself down.
+5. Ask the watch something.
 
-1. On the watch: **Settings → About watch → Software information**, tap **Software version** five times. Then **Settings → Developer options**: turn on **ADB debugging** and **Wireless debugging**. Keep the watch on the same Wi-Fi as the phone.
-2. On the phone, in the browser and signed in to GitHub, open the latest successful run on the [Actions page](../../actions). Download **both** `wear-debug-apk` and `mobile-debug-apk`, and unzip them with My Files.
-3. **Watch app:** install a phone ADB app such as Wear Installer 2 or Bugjaeger. Connect it to the watch's IP address (shown under Wireless debugging), pair with the code the watch shows, and tap *Always allow* on the watch. Then install `app-debug.apk` *through that app*. Tapping it in My Files tries to install it on the phone, which refuses because it is a watch app.
-4. **Phone app:** tap `mobile-debug.apk` in My Files. If Play Protect blocks it, choose *More details → Install anyway*.
-5. Open ClaudeWatch on the phone, paste your API key, and tap **Send key to watch**. Wait for "The watch saved the key."
-6. On the watch, open ClaudeWatch and ask something.
+The key page exists only while the watch shows it, needs the PIN, and stops after five wrong PINs. It travels over your local Wi-Fi unencrypted, so use it on your home network, not on public Wi-Fi. If Claude ever rejects the key, the watch shows the page again.
 
-If an update ever fails to install with a signature error, uninstall the old version first. Until builds use a fixed signing key, each new build needs this, and the key must then be sent again.
+If an update fails to install with a signature error, uninstall the old version first and set the key again. Until builds use a fixed signing key, every new build needs this.
+
+The `mobile` phone app can also send the key over the watch connection, but it isn't needed. Newer Android versions block it as an app from an unverified developer unless you enable *Allow apps from unverified developers*, which takes 24 hours.
 
 ## Install from a Mac
 

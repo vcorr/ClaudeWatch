@@ -150,6 +150,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Compose for Wear OS Material 3 (Phase 2b); probe in plain views | Recommended toolkit; screenshot-tested in CI; probe not held up |
 | Phone companion | Key entry only: the `mobile` app sends the key to the watch over the Data Layer (`MessageClient`, not `DataClient`, so it isn't stored or replicated); `mobile` otherwise stays an API test harness | Owner wants setup without a computer (2 Oct 2026), which removes the premise for cutting it |
+| Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); phone app and adb remain alternatives | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
 ## Owner's answers (1 October 2026)

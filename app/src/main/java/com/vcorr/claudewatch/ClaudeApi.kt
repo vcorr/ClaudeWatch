@@ -38,6 +38,8 @@ object ClaudeApi {
 
         OutputStreamWriter(conn.outputStream).use { it.write(body) }
 
+        if (conn.responseCode == 401) throw InvalidApiKeyException()
+
         if (conn.responseCode == 200) {
             val responseText = conn.inputStream.bufferedReader().readText()
             JSONObject(responseText)
@@ -50,3 +52,6 @@ object ClaudeApi {
         }
     }
 }
+
+/** The API rejected the key (HTTP 401). */
+class InvalidApiKeyException : Exception("API key rejected")

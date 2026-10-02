@@ -11,6 +11,24 @@
         android:layout_height="match_parent"
         app:boxedEdges="all">
 
+        <!-- Key setup state: address and PIN for the phone's browser -->
+        <ScrollView
+            android:id="@+id/layout_setup"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tv_setup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="4dp"
+                android:textColor="@android:color/white"
+                android:textSize="13sp" />
+
+        </ScrollView>
+
         <!-- Idle state: input + send -->
         <LinearLayout
             android:id="@+id/layout_idle"
