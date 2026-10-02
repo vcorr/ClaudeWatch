@@ -32,6 +32,16 @@ jobs:
       - name: Build debug APKs
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Inspect APKs
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for apk in app/build/outputs/apk/debug/app-debug.apk mobile/build/outputs/apk/debug/mobile-debug.apk; do
+            echo "== $apk"
+            "$BT/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|minSdkVersion|targetSdkVersion|uses-feature|native-code|application-debuggable|testOnly)" || true
+            "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -iE "testOnly|extractNativeLibs|required" || true
+            "$BT/apksigner" verify --verbose --print-certs "$apk" | grep -E "^Verified using|certificate SHA-256" || true
+          done
+
       - name: Upload wear APK
         uses: actions/upload-artifact@v7
         with:
