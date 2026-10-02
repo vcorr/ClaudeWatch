@@ -39,4 +39,5 @@ kotlin {
 dependencies {
     implementation(libs.androidx.wear)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.play.services.wearable)
 }

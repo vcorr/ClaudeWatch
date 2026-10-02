@@ -66,7 +66,7 @@ class MainActivity : Activity() {
         scope.launch {
             val apiKey = ApiKeyStore.read(this@MainActivity)
             if (apiKey == null) {
-                showError("No API key. Set it with adb (see README).")
+                showError("No API key. Send it from the ClaudeWatch phone app.")
                 return@launch
             }
             try {

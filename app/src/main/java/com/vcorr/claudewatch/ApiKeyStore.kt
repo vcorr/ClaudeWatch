@@ -1,12 +1,14 @@
 package com.vcorr.claudewatch
 
 import android.content.Context
+import android.util.AtomicFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * The API key lives in a private file provisioned over adb (see README), never in the APK.
+ * The API key lives in a private file on the device, never in the APK. It arrives from the phone
+ * app over the Wearable Data Layer, or over adb (see README).
  */
 object ApiKeyStore {
 
@@ -18,5 +20,25 @@ object ApiKeyStore {
             ?.readText()
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Blocking; call off the main thread. Returns false if the key is blank or the write fails. */
+    fun write(context: Context, key: String): Boolean {
+        val trimmed = key.trim()
+        if (trimmed.isEmpty()) return false
+        val file = AtomicFile(File(context.filesDir, FILE_NAME))
+        val out = try {
+            file.startWrite()
+        } catch (e: java.io.IOException) {
+            return false
+        }
+        return try {
+            out.write(trimmed.toByteArray(Charsets.UTF_8))
+            file.finishWrite(out)
+            true
+        } catch (e: java.io.IOException) {
+            file.failWrite(out)
+            false
+        }
     }
 }

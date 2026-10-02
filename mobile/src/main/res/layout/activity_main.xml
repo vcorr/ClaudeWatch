@@ -7,6 +7,29 @@
     android:orientation="vertical"
     android:padding="16dp">
 
+    <!-- API key: saved on this phone and sent to the watch -->
+    <EditText
+        android:id="@+id/et_key"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Paste Anthropic API key"
+        android:importantForAutofill="no"
+        android:inputType="textPassword|textNoSuggestions"
+        android:singleLine="true" />
+
+    <Button
+        android:id="@+id/btn_send_key"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Send key to watch" />
+
+    <TextView
+        android:id="@+id/tv_key_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:textSize="14sp" />
+
     <!-- Idle state -->
     <LinearLayout
         android:id="@+id/layout_idle"

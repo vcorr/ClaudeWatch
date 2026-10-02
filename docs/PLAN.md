@@ -2,7 +2,7 @@
 
 **Goal:** a Claude voice chat on a Samsung Galaxy Watch, for carrying on a conversation when the phone and computer are out of reach. Speak, hear Claude answer, keep going hands-free. English only. One user, sideloaded; no Play Store release.
 
-**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents, health data or avatars; a phone companion app.
+**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents, health data or avatars; a phone companion beyond sending the API key.
 
 ## Constraints that shape the plan
 
@@ -149,7 +149,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Compose for Wear OS Material 3 (Phase 2b); probe in plain views | Recommended toolkit; screenshot-tested in CI; probe not held up |
-| Phone companion | Cut; `mobile` kept as an API test harness | One user with ADB doesn't need it |
+| Phone companion | Key entry only: the `mobile` app sends the key to the watch over the Data Layer (`MessageClient`, not `DataClient`, so it isn't stored or replicated); `mobile` otherwise stays an API test harness | Owner wants setup without a computer (2 Oct 2026), which removes the premise for cutting it |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
 ## Owner's answers (1 October 2026)

@@ -13,11 +13,18 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.gms.wearable.MessageClient
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,6 +37,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var layoutResult: ScrollView
     private lateinit var tvResponse: TextView
     private lateinit var btnAgain: Button
+    private lateinit var etKey: EditText
+    private lateinit var btnSendKey: Button
+    private lateinit var tvKeyStatus: TextView
+
+    private var keyReplyTimeout: Job? = null
+
+    private val keyReplyListener = MessageClient.OnMessageReceivedListener { event ->
+        when (event.path) {
+            KeySync.PATH_SAVED -> keyStatus("The watch saved the key.")
+            KeySync.PATH_FAILED -> keyStatus("The watch couldn't save the key. Try again.")
+            else -> return@OnMessageReceivedListener
+        }
+        keyReplyTimeout?.cancel()
+        btnSendKey.isEnabled = true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +65,11 @@ class MainActivity : AppCompatActivity() {
         layoutResult = findViewById(R.id.layout_result)
         tvResponse = findViewById(R.id.tv_response)
         btnAgain = findViewById(R.id.btn_again)
+        etKey = findViewById(R.id.et_key)
+        btnSendKey = findViewById(R.id.btn_send_key)
+        tvKeyStatus = findViewById(R.id.tv_key_status)
+
+        btnSendKey.setOnClickListener { sendKeyToWatch() }
 
         btnSend.setOnClickListener { submit() }
         btnAgain.setOnClickListener { showIdle() }
@@ -67,6 +94,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        Wearable.getMessageClient(this).addListener(keyReplyListener)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Wearable.getMessageClient(this).removeListener(keyReplyListener)
+    }
+
+    private fun sendKeyToWatch() {
+        val key = etKey.text.toString().trim()
+        if (key.isEmpty()) return
+        btnSendKey.isEnabled = false
+        keyReplyTimeout?.cancel()
+        scope.launch {
+            // Keep a copy here too, so the phone's own test chat works.
+            withContext(Dispatchers.IO) { ApiKeyStore.write(this@MainActivity, key) }
+            etKey.text.clear()
+            keyStatus("Looking for the watch…")
+            // Armed before sending: the watch's reply can arrive before sendMessage() returns,
+            // and the reply listener cancels this job.
+            val timeout = scope.launch {
+                delay(15_000)
+                keyStatus(
+                    "No reply from the watch. Is ClaudeWatch installed there, " +
+                        "from the same build as this app?"
+                )
+                btnSendKey.isEnabled = true
+            }
+            keyReplyTimeout = timeout
+            try {
+                val nodes = Wearable.getNodeClient(this@MainActivity).connectedNodes.await()
+                if (nodes.isEmpty()) {
+                    timeout.cancel()
+                    keyStatus("Saved on this phone, but no watch is connected.")
+                    btnSendKey.isEnabled = true
+                    return@launch
+                }
+                val bytes = key.toByteArray(Charsets.UTF_8)
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(this@MainActivity)
+                        .sendMessage(node.id, KeySync.PATH_KEY, bytes)
+                        .await()
+                }
+                if (timeout.isActive) keyStatus("Sent. Waiting for the watch…")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                timeout.cancel()
+                keyStatus("Couldn't reach the watch: ${e.message ?: "unknown error"}")
+                btnSendKey.isEnabled = true
+            }
+        }
+    }
+
+    private fun keyStatus(message: String) {
+        tvKeyStatus.text = message
+    }
+
     private fun submit() {
         val prompt = etPrompt.text.toString().trim()
         if (prompt.isEmpty()) return
@@ -84,7 +171,7 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             val apiKey = ApiKeyStore.read(this@MainActivity)
             if (apiKey == null) {
-                showError("No API key. Set it with adb (see README).")
+                showError("No API key. Paste it above first.")
                 return@launch
             }
             try {

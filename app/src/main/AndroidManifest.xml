@@ -19,6 +19,18 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".KeySyncService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:path="/claudewatch/api_key" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>
