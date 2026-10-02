@@ -11,7 +11,110 @@
         android:layout_height="match_parent"
         app:boxedEdges="all">
 
-        <!-- Key setup state: address and PIN for the phone's browser -->
+        <!-- Voice chat: status, transcript, one big button -->
+        <LinearLayout
+            android:id="@+id/layout_voice"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Tap to talk"
+                android:textColor="#B0B0B0"
+                android:textSize="12sp" />
+
+            <ScrollView
+                android:id="@+id/scroll_transcript"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/tv_transcript"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp" />
+
+            </ScrollView>
+
+            <Button
+                android:id="@+id/btn_talk"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Talk"
+                android:textSize="16sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_type"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Type"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btn_new"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="New"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btn_probe"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Test"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Typed question -->
+        <LinearLayout
+            android:id="@+id/layout_typing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/et_prompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Ask Claude…"
+                android:imeOptions="actionSend"
+                android:inputType="textShortMessage"
+                android:maxLines="3"
+                android:textColor="@android:color/white"
+                android:textColorHint="@android:color/darker_gray" />
+
+            <Button
+                android:id="@+id/btn_send"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Send"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+        <!-- Key setup: address and PIN for the phone's browser -->
         <ScrollView
             android:id="@+id/layout_setup"
             android:layout_width="match_parent"
@@ -26,100 +129,6 @@
                 android:padding="4dp"
                 android:textColor="@android:color/white"
                 android:textSize="13sp" />
-
-        </ScrollView>
-
-        <!-- Idle state: input + send -->
-        <LinearLayout
-            android:id="@+id/layout_idle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:orientation="vertical"
-            android:gravity="center">
-
-            <EditText
-                android:id="@+id/et_prompt"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Ask Claude…"
-                android:textColor="@android:color/white"
-                android:textColorHint="@android:color/darker_gray"
-                android:inputType="textShortMessage"
-                android:imeOptions="actionSend"
-                android:maxLines="3" />
-
-            <Button
-                android:id="@+id/btn_send"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Send"
-                android:textSize="14sp" />
-
-            <Button
-                android:id="@+id/btn_probe"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Voice test"
-                android:textSize="12sp" />
-
-        </LinearLayout>
-
-        <!-- Loading state -->
-        <LinearLayout
-            android:id="@+id/layout_loading"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <ProgressBar
-                android:layout_width="40dp"
-                android:layout_height="40dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Thinking…"
-                android:textColor="@android:color/white"
-                android:textSize="14sp" />
-
-        </LinearLayout>
-
-        <!-- Result state -->
-        <ScrollView
-            android:id="@+id/layout_result"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp">
-
-                <TextView
-                    android:id="@+id/tv_response"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@android:color/white"
-                    android:textSize="14sp" />
-
-                <Button
-                    android:id="@+id/btn_again"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_horizontal"
-                    android:layout_marginTop="8dp"
-                    android:text="Ask again"
-                    android:textSize="13sp" />
-
-            </LinearLayout>
 
         </ScrollView>
 

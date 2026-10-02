@@ -28,7 +28,7 @@
 
 *Device checklist:* uninstall the old build (CI still signs with a random key until Phase 2a, so every install until then needs an uninstall and the key provisioned again); install; provision the key; a typed question still gets an answer.
 
-## Phase 1 — Device probe
+## Phase 1 — Device probe 🟡 built 2 Oct 2026, awaiting the owner's results
 
 A diagnostics screen in plain views, so it doesn't wait for the Compose work, in the same APK. The manifest declares `<queries>` for `android.speech.RecognitionService` and `android.intent.action.TTS_SERVICE`; without them API 30+ hides both and the probe reports false negatives. The probe requests microphone permission first, then reports:
 - `SpeechRecognizer.isRecognitionAvailable`, the on-device variant, and the recognition services it can see;
@@ -42,6 +42,8 @@ No public API reads the always-on display setting, so the owner reports it along
 The owner runs it twice, once with the phone's Bluetooth off and the watch on Wi-Fi, and sends screenshots, noting whether always-on display is on. (Installing it needs the same uninstall and key provisioning as Phase 0.) That settles the speech route and confirms the app works over the watch's own Wi-Fi.
 
 ## Phase 2 — Foundations (signing, tests, Compose)
+
+**Status (2 Oct 2026):** stable signing deferred; the owner prefers uninstalling between builds to putting a signing key in a public repo or using a computer. The `core` module and its unit tests were built together with Phase 3. Compose (2b) moves after Phase 3.
 
 Two separate CI changes, so a Compose problem can't hold up the rest.
 
@@ -57,7 +59,9 @@ Two separate CI changes, so a Compose problem can't hold up the rest.
 
 *Device checklist:* uninstall once; install; provision the key; ask a question; install the next CI build over it and confirm the key survived.
 
-## Phase 3 — Hands-free voice loop
+## Phase 3 — Hands-free voice loop 🟡 built 2 Oct 2026, awaiting device check
+
+**Order changed:** built before Compose (2b), on the existing views, because voice is what the owner is waiting for. Both speech routes ship, with automatic fallback: the in-app recogniser is tried first, and if it fails before it is ever ready (the known Galaxy Watch error is "no selected voice recognition service"), the app switches to the system dialog and remembers the choice. Google's Wear OS guide documents only the system dialog ([Voice input](https://developer.android.com/training/wearables/user-input/voice)). The probe's results now only tune the default.
 
 - A `SpeechInput` interface with two implementations, defaulting to whichever the probe chose:
   - `SpeechRecognizer`: in-app, with a live partial transcript;
@@ -148,7 +152,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | Model | Haiku 4.5, `max_tokens` 1,024 | Fastest and cheapest ($1 / $5 per million input / output tokens); brevity from the prompt, not the cap |
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
-| UI | Compose for Wear OS Material 3 (Phase 2b); probe in plain views | Recommended toolkit; screenshot-tested in CI; probe not held up |
+| UI | Views for now; Compose for Wear OS Material 3 after Phase 3 | Voice first; the voice screen is small, so rebuilding it later is cheap |
 | Phone companion | Key entry only: the `mobile` app sends the key to the watch over the Data Layer (`MessageClient`, not `DataClient`, so it isn't stored or replicated); `mobile` otherwise stays an API test harness | Owner wants setup without a computer (2 Oct 2026), which removes the premise for cutting it |
 | Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); phone app and adb remain alternatives | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |

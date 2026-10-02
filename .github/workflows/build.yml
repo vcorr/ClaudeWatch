@@ -30,7 +30,7 @@ jobs:
         run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
       - name: Build debug APKs
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew :core:test assembleDebug --no-daemon
 
       - name: Inspect APKs
         run: |
