@@ -44,8 +44,9 @@ class MainActivity : Activity() {
 
     private lateinit var layoutVoice: LinearLayout
     private lateinit var tvStatus: TextView
-    private lateinit var scrollTranscript: ScrollView
-    private lateinit var tvTranscript: TextView
+    private lateinit var tvQuestion: TextView
+    private lateinit var scrollReply: ScrollView
+    private lateinit var tvReply: TextView
     private lateinit var btnTalk: Button
     private lateinit var layoutTyping: LinearLayout
     private lateinit var etPrompt: EditText
@@ -61,6 +62,7 @@ class MainActivity : Activity() {
     private lateinit var speaker: Speaker
     private var inAppInput: InAppSpeechInput? = null
     private lateinit var dialogInput: DialogSpeechInput
+    // Set when no in-app speech service works; for this session only, so the next launch tries again.
     private var useDialog = false
     private var requestJob: Job? = null
     private var followUpJob: Job? = null
@@ -80,8 +82,9 @@ class MainActivity : Activity() {
 
         layoutVoice = findViewById(R.id.layout_voice)
         tvStatus = findViewById(R.id.tv_status)
-        scrollTranscript = findViewById(R.id.scroll_transcript)
-        tvTranscript = findViewById(R.id.tv_transcript)
+        tvQuestion = findViewById(R.id.tv_question)
+        scrollReply = findViewById(R.id.scroll_reply)
+        tvReply = findViewById(R.id.tv_reply)
         btnTalk = findViewById(R.id.btn_talk)
         layoutTyping = findViewById(R.id.layout_typing)
         etPrompt = findViewById(R.id.et_prompt)
@@ -90,7 +93,6 @@ class MainActivity : Activity() {
 
         speaker = Speaker(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
-        useDialog = getPreferences(MODE_PRIVATE).getBoolean(PREF_USE_DIALOG, false)
 
         btnTalk.setOnClickListener { onTalkTapped() }
         findViewById<Button>(R.id.btn_type).setOnClickListener { showTyping() }
@@ -222,7 +224,8 @@ class MainActivity : Activity() {
                 followUpJob?.cancel()
                 state = State.LISTENING
                 render()
-                tvTranscript.text = "$text…"
+                tvQuestion.text = "$text…"
+                tvReply.text = ""
             }
 
             override fun onResult(text: String) {
@@ -242,9 +245,8 @@ class MainActivity : Activity() {
                 if (!current()) return
                 followUpJob?.cancel()
                 if (routeUnavailable && input !== dialogInput) {
-                    // The in-app recogniser doesn't work here: switch to the system dialog for good.
+                    // No in-app speech service works here: use the system dialog for this session.
                     useDialog = true
-                    getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_USE_DIALOG, true).apply()
                     startListening(followUp)
                     return
                 }
@@ -271,7 +273,8 @@ class MainActivity : Activity() {
         val token = turnToken
         conversation.addUser(text)
         state = State.THINKING
-        tvTranscript.text = "You: $text"
+        tvQuestion.text = text
+        tvReply.text = ""
         render()
 
         requestJob = scope.launch {
@@ -284,8 +287,8 @@ class MainActivity : Activity() {
                 val reply = ClaudeApi.reply(conversation.forRequest(), key)
                 if (token != turnToken) return@launch
                 conversation.addAssistant(reply)
-                tvTranscript.text = "You: $text\n\n$reply"
-                scrollTranscript.scrollTo(0, 0)
+                tvReply.text = reply
+                scrollReply.scrollTo(0, 0)
                 speak(reply, token)
             } catch (e: CancellationException) {
                 throw e
@@ -339,7 +342,8 @@ class MainActivity : Activity() {
     private fun newChat() {
         interrupt(null)
         conversation.clear()
-        tvTranscript.text = ""
+        tvQuestion.text = ""
+        tvReply.text = ""
         tvStatus.text = "New chat. Tap to talk."
     }
 
@@ -485,7 +489,6 @@ class MainActivity : Activity() {
     private companion object {
         const val REQ_MIC = 1
         const val REQ_DIALOG = 2
-        const val PREF_USE_DIALOG = "use_dialog"
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
     }
