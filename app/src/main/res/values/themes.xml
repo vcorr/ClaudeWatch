@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The voice screen floats over the watch face, as Gemini does: on Wear OS the watch face is
+        drawn as the wallpaper, so showing the wallpaper behind a transparent window shows it.
+        Where there is none, the background is simply black.
+    -->
+    <style name="Theme.ClaudeWatch.Overlay" parent="@android:style/Theme.DeviceDefault">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

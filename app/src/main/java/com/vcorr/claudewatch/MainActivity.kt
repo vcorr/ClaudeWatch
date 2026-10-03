@@ -12,10 +12,14 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
@@ -24,6 +28,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -57,15 +62,16 @@ class MainActivity : Activity() {
     private lateinit var tvLead: TextView
     private lateinit var tvMain: TextView
     private lateinit var micArea: View
-    private lateinit var ringOuter: View
-    private lateinit var ringInner: View
     private lateinit var ringProgress: RingView
     private lateinit var btnTalk: ImageButton
     private lateinit var tvTitle: TextView
     private lateinit var tvCaption: TextView
     private lateinit var scrollReply: ScrollView
     private lateinit var tvReply: TextView
-    private lateinit var btnStop: ImageButton
+    private lateinit var scrim: View
+    private lateinit var glow: View
+    private lateinit var ivClawdSmall: ImageView
+    private lateinit var tvHint: TextView
     private lateinit var btnCancel: Button
     private lateinit var rowActions: LinearLayout
     private lateinit var btnTalkSmall: ImageButton
@@ -93,7 +99,7 @@ class MainActivity : Activity() {
     private var followUpTimed = false
 
     private lateinit var clawdBob: ObjectAnimator
-    private lateinit var ringPulse: ObjectAnimator
+    private lateinit var glowPulse: ObjectAnimator
     private var followUpCountdown: ValueAnimator? = null
 
     // Bumped by every new turn or interruption; callbacks from older turns are ignored.
@@ -141,15 +147,16 @@ class MainActivity : Activity() {
         tvLead = findViewById(R.id.tv_lead)
         tvMain = findViewById(R.id.tv_main)
         micArea = findViewById(R.id.mic_area)
-        ringOuter = findViewById(R.id.ring_outer)
-        ringInner = findViewById(R.id.ring_inner)
         ringProgress = findViewById(R.id.ring_progress)
         btnTalk = findViewById(R.id.btn_talk)
         tvTitle = findViewById(R.id.tv_title)
         tvCaption = findViewById(R.id.tv_caption)
         scrollReply = findViewById(R.id.scroll_reply)
         tvReply = findViewById(R.id.tv_reply)
-        btnStop = findViewById(R.id.btn_stop)
+        scrim = findViewById(R.id.scrim)
+        glow = findViewById(R.id.glow)
+        ivClawdSmall = findViewById(R.id.iv_clawd_small)
+        tvHint = findViewById(R.id.tv_hint)
         btnCancel = findViewById(R.id.btn_cancel)
         rowActions = findViewById(R.id.row_actions)
         btnTalkSmall = findViewById(R.id.btn_talk_small)
@@ -169,25 +176,34 @@ class MainActivity : Activity() {
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
         }
-        ringPulse = ObjectAnimator.ofPropertyValuesHolder(
-            ringOuter,
-            PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.08f),
-            PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.08f),
-            PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.45f),
+        // The glow: the accent fading out from a point just below the screen's bottom edge.
+        val accent = getColor(R.color.accent)
+        glow.background = GradientDrawable().apply {
+            gradientType = GradientDrawable.RADIAL_GRADIENT
+            gradientRadius = 105f * density
+            setGradientCenter(0.5f, 0.5f)
+            colors = intArrayOf((0x8C shl 24) or (accent and 0xFFFFFF), accent and 0xFFFFFF)
+        }
+        // While listening the glow breathes, to show the microphone is open.
+        glowPulse = ObjectAnimator.ofPropertyValuesHolder(
+            glow,
+            PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.12f),
+            PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.12f),
+            PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.7f),
         ).apply {
-            duration = 700
+            duration = 900
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
         }
 
         btnTalk.setOnClickListener { onTalkTapped() }
         btnTalkSmall.setOnClickListener { onTalkTapped() }
-        btnStop.setOnClickListener { interrupt(null) }
         btnCancel.setOnClickListener { interrupt(null) }
         // While Claude talks, or waits for a follow-up, a tap anywhere stops it, not just the button.
         val stopAnywhere = View.OnClickListener {
             when (state) {
                 State.SPEAKING, State.FOLLOW_UP -> interrupt(null)
+                State.LISTENING -> currentInput().stop() // done talking: send it
                 State.IDLE -> speaker.stop() // a spoken error
                 else -> Unit
             }
@@ -725,7 +741,7 @@ class MainActivity : Activity() {
         // After an answer, idle keeps the reply on screen to read and scroll, with a small talk button.
         val readingReply = state == State.IDLE && !problem && idleMessage == null && reply != null
 
-        ivClawd.show((state == State.IDLE && !problem && !readingReply) || state == State.THINKING)
+        ivClawd.show((state == State.IDLE && !problem && !readingReply) || state == State.THINKING || state == State.LISTENING)
         tvStatus.show(state == State.LISTENING || state == State.THINKING || (state == State.SPEAKING && toolLabel != null))
         tvStatus.text = when (state) {
             State.LISTENING -> "Listening"
@@ -743,10 +759,20 @@ class MainActivity : Activity() {
 
         tvMain.show(state == State.LISTENING || state == State.THINKING)
         if (state == State.THINKING) tvMain.text = pendingQuestion
+        // Heard words are the point while listening; the question is a reminder while thinking.
+        if (state == State.THINKING) {
+            tvMain.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            tvMain.setTextColor(getColor(R.color.soft))
+            tvMain.setTypeface(null, Typeface.NORMAL)
+        } else {
+            tvMain.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            tvMain.setTextColor(getColor(R.color.ink))
+            tvMain.setTypeface(null, Typeface.BOLD)
+        }
 
-        micArea.show(state == State.IDLE && !readingReply || state == State.LISTENING || state == State.FOLLOW_UP)
-        ringOuter.show(state == State.LISTENING)
-        ringInner.show(state == State.LISTENING)
+        // Listening has no button in the overlay: Clawd and the words heard, with the glow alive
+        // behind them; a tap anywhere sends.
+        micArea.show(state == State.IDLE && !readingReply || state == State.FOLLOW_UP)
         ringProgress.show(state == State.FOLLOW_UP && followUpTimed)
         btnTalk.setBackgroundResource(if (problem) R.drawable.bg_mic_outline else R.drawable.bg_mic_filled)
         btnTalk.imageTintList = getColorStateList(if (problem) R.color.accent else R.color.ink_on_accent)
@@ -762,16 +788,57 @@ class MainActivity : Activity() {
         tvCaption.show(problem)
 
         scrollReply.show(state == State.SPEAKING || readingReply)
-        btnStop.show(state == State.SPEAKING)
+        ivClawdSmall.show(state == State.SPEAKING)
+        tvHint.show(state == State.SPEAKING)
         btnCancel.show(state == State.THINKING)
         rowActions.show(state == State.IDLE)
         btnTalkSmall.show(readingReply)
 
         clawdBob.runWhile(state == State.THINKING)
-        ringPulse.runWhile(state == State.LISTENING)
+        glowPulse.runWhile(state == State.LISTENING)
+        renderOverlay(readingReply || problem)
         if (state != State.FOLLOW_UP) followUpCountdown?.cancel()
         // Lets the watch's bezel or crown scroll the reply.
         if (scrollReply.visibility == View.VISIBLE) scrollReply.requestFocus()
+    }
+
+    /**
+     * The overlay around the faces: how dark the veil over the watch face is, where the glow sits,
+     * and whether the content gathers at the bottom near the glow (listening, thinking) or centres.
+     */
+    private fun renderOverlay(reading: Boolean) {
+        val veil = when (state) {
+            State.LISTENING -> 0.62f
+            State.THINKING -> 0.68f
+            State.FOLLOW_UP -> 0.75f
+            State.SPEAKING -> 0.85f
+            State.IDLE -> if (reading) 0.85f else 0.75f
+            State.TYPING, State.SETUP -> 0.94f
+        }
+        scrim.alpha = veil
+        // How far the glow's box sits below the screen's bottom edge: higher while listening.
+        val sink = when (state) {
+            State.LISTENING -> 110
+            State.THINKING -> 125
+            State.SPEAKING, State.FOLLOW_UP -> 150
+            else -> 160
+        }
+        glow.show(state != State.TYPING && state != State.SETUP)
+        (glow.layoutParams as FrameLayout.LayoutParams).let {
+            val margin = -(sink * resources.displayMetrics.density).toInt()
+            if (it.bottomMargin != margin) {
+                it.bottomMargin = margin
+                glow.layoutParams = it
+            }
+        }
+        val bottom = state == State.LISTENING || state == State.THINKING
+        layoutVoice.gravity = if (bottom) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
+        layoutVoice.setPadding(
+            layoutVoice.paddingLeft,
+            layoutVoice.paddingTop,
+            layoutVoice.paddingRight,
+            ((if (bottom) 46 else 18) * resources.displayMetrics.density).toInt(),
+        )
     }
 
     private fun startFollowUpCountdown() {
@@ -793,13 +860,9 @@ class MainActivity : Activity() {
         if (running) {
             if (!isStarted) start()
         } else if (isStarted) {
+            // Back to where it started, touching only what it animates.
             cancel()
-            (target as View).apply {
-                translationY = 0f
-                scaleX = 1f
-                scaleY = 1f
-                alpha = 1f
-            }
+            setCurrentFraction(0f)
         }
     }
 

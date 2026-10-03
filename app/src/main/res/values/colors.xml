@@ -3,10 +3,11 @@
     <!-- The voice states canvas: black ground, one accent. -->
     <color name="ground">#FF000000</color>
     <color name="accent">#FFD97757</color>
-    <color name="accent_dim">#FF5A3A2E</color>
     <color name="ink">#FFF2F1EC</color>
     <color name="ink_on_accent">#FF141413</color>
     <color name="muted">#FFA3A29C</color>
+    <!-- Secondary text over the watch face, a little lighter than muted to hold up on the veil. -->
+    <color name="soft">#FFD6D4CD</color>
     <color name="hairline">#FF3A3A37</color>
     <color name="track">#FF2A2A28</color>
 </resources>
