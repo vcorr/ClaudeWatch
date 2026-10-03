@@ -135,7 +135,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 
 ## Phase 7 — Quick access
 
-**Status (3 Oct 2026):** the owner maps the Home key's double press to ClaudeWatch; returning to the app that way listens again, and the app closes itself 8 s after a conversation ends in silence. The tile is still to do.
+**Status (3 Oct 2026):** the owner maps the Home key's double press to ClaudeWatch; returning to the app that way listens again, and the app closes itself 8 s after a conversation ends in silence. The Talk tile is built (Clawd and a Talk button that opens the app listening); the app is single-task, so a tile tap or double press reaches the running instance. Awaiting the device checklist.
 
 - A tile with a "Talk" button.
 - README instructions for mapping the side button's double press to the app.
