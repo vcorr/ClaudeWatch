@@ -10,7 +10,6 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -36,7 +35,7 @@ class ProbeActivity : Activity() {
     private lateinit var scroll: ScrollView
     private lateinit var tvLog: TextView
     private var tts: TextToSpeech? = null
-    private var recognizer: SpeechRecognizer? = null
+    private var inApp: InAppSpeechInput? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -125,42 +124,30 @@ class ProbeActivity : Activity() {
 
     // ── Interactive tests ───────────────────────────────────
 
+    /**
+     * Runs the app's own in-app listening, which tries every speech route in turn, and logs each
+     * attempt: which route, which language, and why it failed. Speak once it says "listening".
+     */
     private fun testInAppListening() {
-        recognizer?.destroy()
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            log("In-app listening: not available")
-            return
-        }
+        inApp?.destroy()
         val start = SystemClock.elapsedRealtime()
         fun t() = "${(SystemClock.elapsedRealtime() - start) / 100 / 10.0}s"
-        val sr = SpeechRecognizer.createSpeechRecognizer(this)
-        recognizer = sr
-        sr.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) = log("Listening… speak now (${t()})")
-            override fun onBeginningOfSpeech() = log("Heard speech (${t()})")
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() = log("End of speech (${t()})")
-            override fun onError(error: Int) = log("In-app listening error: ${errorName(error)} (${t()})")
-            override fun onPartialResults(partialResults: Bundle?) {
-                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!text.isNullOrBlank()) log("… $text")
-            }
-            override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                log("In-app result: \"${text ?: ""}\" (${t()})")
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
+        val input = InAppSpeechInput(this)
+        input.log = { line -> log("· $line (${t()})") }
+        inApp = input
+        log("In-app listening: trying each speech route")
+        input.start(object : SpeechInput.Listener {
+            override fun onListening() = log("Speak now…")
+            override fun onSpeechStarted() = log("Heard speech (${t()})")
+            override fun onPartial(text: String) = log("… $text")
+            override fun onResult(text: String) = log("In-app result: \"$text\" (${t()})")
+            override fun onNothingHeard() = log("In-app: heard nothing (${t()})")
+            override fun onError(message: String, routeUnavailable: Boolean) =
+                log("In-app: $message${if (routeUnavailable) ", so the app would open the system dialog" else ""}")
         })
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        log("In-app listening: starting")
-        sr.startListening(intent)
         scope.launch {
-            delay(8_000)
-            if (recognizer === sr) sr.stopListening()
+            delay(20_000)
+            if (inApp === input) input.stop()
         }
     }
 
@@ -210,26 +197,9 @@ class ProbeActivity : Activity() {
         }
     }
 
-    private fun errorName(code: Int) = when (code) {
-        1 -> "NETWORK_TIMEOUT"
-        2 -> "NETWORK"
-        3 -> "AUDIO"
-        4 -> "SERVER"
-        5 -> "CLIENT"
-        6 -> "SPEECH_TIMEOUT (heard nothing)"
-        7 -> "NO_MATCH (didn't understand)"
-        8 -> "RECOGNIZER_BUSY"
-        9 -> "INSUFFICIENT_PERMISSIONS"
-        10 -> "TOO_MANY_REQUESTS"
-        11 -> "SERVER_DISCONNECTED"
-        12 -> "LANGUAGE_NOT_SUPPORTED"
-        13 -> "LANGUAGE_UNAVAILABLE"
-        else -> "code $code"
-    }
-
     override fun onDestroy() {
         super.onDestroy()
-        recognizer?.destroy()
+        inApp?.destroy()
         tts?.shutdown()
         scope.cancel()
     }

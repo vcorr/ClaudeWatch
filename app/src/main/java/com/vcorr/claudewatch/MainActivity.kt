@@ -15,7 +15,6 @@ import android.net.NetworkRequest
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.speech.SpeechRecognizer
 import android.view.View
 import android.view.animation.LinearInterpolator
 import android.view.WindowManager
@@ -253,7 +252,7 @@ class MainActivity : Activity() {
     }
 
     private fun currentInput(): SpeechInput =
-        if (!useDialog && SpeechRecognizer.isRecognitionAvailable(this)) {
+        if (!useDialog && InAppSpeechInput.isAvailable(this)) {
             inAppInput ?: InAppSpeechInput(this).also { inAppInput = it }
         } else {
             dialogInput
