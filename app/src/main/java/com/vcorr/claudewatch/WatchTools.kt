@@ -27,6 +27,7 @@ import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.view.KeyEvent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -43,6 +44,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -54,6 +57,12 @@ import kotlin.math.roundToInt
 class WatchTools(private val context: Context) {
 
     private val notes = NoteStore(context)
+
+    /** The app's speaker, so a volume change sets the wearer's own level, not its speaking floor. */
+    var speaker: Speaker? = null
+
+    /** Runs on the main thread just before another app's screen may open, e.g. the Clock's. */
+    var beforeLeaving: (() -> Unit)? = null
 
     /** A tool failed in a way Claude should hear about and explain, such as a missing permission. */
     class ToolException(message: String) : Exception(message)
@@ -494,6 +503,7 @@ class WatchTools(private val context: Context) {
         if (!onScreen()) throw ToolException("The watch screen went off before the Clock app could be asked; try again with the screen on.")
         withContext(Dispatchers.Main) {
             try {
+                beforeLeaving?.invoke()
                 context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } catch (e: ActivityNotFoundException) {
                 throw ToolException("No app on this watch accepts timers or alarms from other apps; the wearer can set it in the Clock app.")
@@ -524,24 +534,12 @@ class WatchTools(private val context: Context) {
 
     private suspend fun media(action: String, level: Int): String {
         val audio = context.getSystemService(AudioManager::class.java)
-        val stream = AudioManager.STREAM_MUSIC
-        fun volume() = "Media volume is now ${percent(audio.getStreamVolume(stream), audio.getStreamMaxVolume(stream))}%."
         val key = when (action) {
             "play" -> KeyEvent.KEYCODE_MEDIA_PLAY
             "pause" -> KeyEvent.KEYCODE_MEDIA_PAUSE
             "next" -> KeyEvent.KEYCODE_MEDIA_NEXT
             "previous" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
-            "volume_up", "volume_down" -> {
-                val direction = if (action == "volume_up") AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-                audio.adjustStreamVolume(stream, direction, 0)
-                return volume()
-            }
-            "set_volume" -> {
-                if (level !in 0..100) throw ToolException("set_volume needs a level from 0 to 100.")
-                val max = audio.getStreamMaxVolume(stream)
-                audio.setStreamVolume(stream, (level * max + 50) / 100, 0)
-                return volume()
-            }
+            "volume_up", "volume_down", "set_volume" -> return volume(action, level)
             else -> throw ToolException("Unknown media action $action.")
         }
         // With notification access, steer the active player directly and say which it is.
@@ -564,6 +562,30 @@ class WatchTools(private val context: Context) {
             "If nothing has played since the watch started, nothing will respond."
     }
 
+    /** One step up or down, or a percentage, applied to the wearer's own volume level. */
+    private suspend fun volume(action: String, level: Int): String {
+        if (action == "set_volume" && level !in 0..100) throw ToolException("set_volume needs a level from 0 to 100.")
+        val change = { current: Int, max: Int ->
+            when (action) {
+                "volume_up" -> current + 1
+                "volume_down" -> current - 1
+                // Any level above nothing stays audible, however small.
+                else -> if (level == 0) 0 else ((level * max + 50) / 100).coerceAtLeast(1)
+            }
+        }
+        val (set, max) = withContext(Dispatchers.Main) {
+            val audio = context.getSystemService(AudioManager::class.java)
+            val stream = AudioManager.STREAM_MUSIC
+            val max = audio.getStreamMaxVolume(stream)
+            val set = speaker?.setUserVolume(change) ?: run {
+                audio.setStreamVolume(stream, change(audio.getStreamVolume(stream), max).coerceIn(0, max), 0)
+                audio.getStreamVolume(stream)
+            }
+            set to max
+        }
+        return "Media volume is now ${percent(set, max)}%." + if (set == 0) " That is muted, so a spoken reply won't be heard." else ""
+    }
+
     private fun notificationAccessOff() = ToolException(
         "Notification access is off for ClaudeWatch. It is granted once, from a phone or computer over ADB; " +
             "ClaudeWatch's diagnostics (a long press on the microphone) show how."
@@ -579,14 +601,14 @@ class WatchTools(private val context: Context) {
         val sensorLine = reading?.let { "The watch's barometer reads ${"%.1f".format(Locale.UK, it)} hPa." }
             ?: "This watch's barometer gave no reading."
 
-        val here = runCatching { recentLocation() }.getOrNull()
+        val here = orNull { recentLocation() }
             ?: return "$sensorLine Without the watch's location there is no sea-level comparison or altitude."
-        val json = runCatching {
+        val json = orNull {
             getJson(
                 "https://api.open-meteo.com/v1/forecast?latitude=${"%.3f".format(Locale.UK, here.latitude)}&longitude=${"%.3f".format(Locale.UK, here.longitude)}" +
-                    "&current=pressure_msl&hourly=pressure_msl&past_days=1&forecast_days=1&timezone=auto"
+                    "&current=pressure_msl&hourly=pressure_msl&past_days=1&forecast_days=2&timezone=auto"
             )
-        }.getOrNull() ?: return "$sensorLine The weather service couldn't be reached for the sea-level pressure."
+        } ?: return "$sensorLine The weather service couldn't be reached for the sea-level pressure."
 
         val msl = json.getJSONObject("current").optDouble("pressure_msl")
         val hourly = json.getJSONObject("hourly")
@@ -597,15 +619,16 @@ class WatchTools(private val context: Context) {
         fun at(index: Int) = values.optDouble(index).takeUnless { it.isNaN() || index !in 0 until values.length() }
         val before = i?.let { at(it - 3) }
         val after = i?.let { at(it + 3) }
+        if (msl.isNaN()) return "$sensorLine The weather service gave no sea-level pressure."
         val trend = buildString {
             append("Sea-level pressure here is ${msl.roundToInt()} hPa now")
             before?.let { append(", ${it.roundToInt()} three hours ago") }
             after?.let { append(", and expected to be ${it.roundToInt()} in three hours") }
             append(".")
         }
-        val altitude = if (reading != null && !msl.isNaN()) {
-            " From the two, the watch is about ${SensorManager.getAltitude(msl.toFloat(), reading).roundToInt()} m above sea level; " +
-                "the ground there is about ${json.optDouble("elevation").roundToInt()} m."
+        val ground = json.optDouble("elevation").takeUnless { it.isNaN() }?.let { "; the ground there is about ${it.roundToInt()} m" } ?: ""
+        val altitude = if (reading != null) {
+            " From the two, the watch is about ${SensorManager.getAltitude(msl.toFloat(), reading).roundToInt()} m above sea level$ground."
         } else {
             ""
         }
@@ -619,17 +642,34 @@ class WatchTools(private val context: Context) {
         val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: sm.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR)
             ?: throw ToolException("This watch doesn't offer a compass to apps.")
-        // Let the reading settle for a moment while the wearer holds still.
-        var accuracy = SensorManager.SENSOR_STATUS_UNRELIABLE
-        val values = settledReading(sm, sensor) { accuracy = it }
-            ?: throw ToolException("The compass gave no reading.")
-        val rotation = FloatArray(9)
-        SensorManager.getRotationMatrixFromVector(rotation, values)
-        val orientation = FloatArray(3)
-        SensorManager.getOrientation(rotation, orientation)
+        val latest = AtomicReference<FloatArray?>()
+        val status = AtomicInteger(SensorManager.SENSOR_STATUS_UNRELIABLE)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                latest.set(event.values.clone())
+                status.set(event.accuracy)
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = status.set(accuracy)
+        }
+        sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        // Give the wearer a moment to hold still, then take the first reading with the watch flat,
+        // or the last one if it never is.
+        var flat: FloatArray? = null
+        try {
+            delay(COMPASS_SETTLE_MS)
+            withTimeoutOrNull(COMPASS_FLAT_WAIT_MS) {
+                while (flat == null) {
+                    flat = latest.get()?.takeIf { isFlat(orientationOf(it)) }
+                    if (flat == null) delay(100)
+                }
+            }
+        } finally {
+            sm.unregisterListener(listener)
+        }
+        val values = flat ?: latest.get() ?: throw ToolException("The compass gave no reading.")
+        val orientation = orientationOf(values)
         var bearing = Math.toDegrees(orientation[0].toDouble())
-        val pitch = Math.toDegrees(orientation[1].toDouble())
-        val roll = Math.toDegrees(orientation[2].toDouble())
         // True north rather than magnetic, when the watch knows roughly where it is.
         val here = lastKnownLocation()
         val northKind = if (here != null) {
@@ -639,35 +679,68 @@ class WatchTools(private val context: Context) {
             "magnetic north"
         }
         val degrees = ((bearing % 360 + 360) % 360).roundToInt() % 360
-        val flat = if (abs(pitch) > 30 || abs(roll) > 30) {
+        val notFlat = if (flat == null) {
             " The watch wasn't held flat, so the reading may be off; ask the wearer to hold it level and try again if it matters."
         } else {
             ""
         }
-        val calibration = if (accuracy < SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM) {
-            " The compass reports low accuracy; moving the wrist in a figure of eight a few times calibrates it."
+        // The rotation vector's own estimate of its heading error, where the watch gives one, is
+        // more telling than the accuracy status, which many watches leave fixed.
+        val errorDegrees = values.getOrNull(4)?.takeIf { sensor.type == Sensor.TYPE_ROTATION_VECTOR && it >= 0 }
+            ?.let { Math.toDegrees(it.toDouble()).roundToInt() }
+        val unsure = errorDegrees?.let { it > COMPASS_MAX_ERROR_DEGREES } ?: (status.get() < SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM)
+        val calibration = if (unsure) {
+            " The compass is unsure${errorDegrees?.let { " (within about $it°)" } ?: ""}; moving the wrist in a figure of eight a few times calibrates it."
         } else {
             ""
         }
-        return "The watch's 12 o'clock edge points $degrees° from $northKind (${compassPoint(degrees)}).$flat$calibration"
+        return "The watch's 12 o'clock edge points $degrees° from $northKind (${compassPoint(degrees)}).$notFlat$calibration"
     }
+
+    /** Azimuth, pitch and roll in radians, from a rotation vector. */
+    private fun orientationOf(rotationVector: FloatArray): FloatArray {
+        val matrix = FloatArray(9)
+        SensorManager.getRotationMatrixFromVector(matrix, rotationVector)
+        return SensorManager.getOrientation(matrix, FloatArray(3))
+    }
+
+    private fun isFlat(orientation: FloatArray) =
+        abs(Math.toDegrees(orientation[1].toDouble())) <= FLAT_DEGREES && abs(Math.toDegrees(orientation[2].toDouble())) <= FLAT_DEGREES
 
     // ── Notes ───────────────────────────────────────────────
 
     private suspend fun remember(text: String, atLocation: Boolean): String {
         if (text.isEmpty()) throw ToolException("There was nothing to remember.")
-        val where = if (atLocation) currentLocation() else null
+        // Without a location (no permission, no fix), the note is still worth keeping.
+        var locationProblem: String? = null
+        val where = if (atLocation) {
+            try {
+                currentLocation()
+            } catch (e: ToolException) {
+                locationProblem = e.message
+                null
+            }
+        } else {
+            null
+        }
         val place = where?.let { placeName(it) }
         val note = withContext(Dispatchers.IO) {
             notes.add(text.take(NoteStore.MAX_LENGTH), where?.latitude, where?.longitude, place)
         } ?: throw ToolException("The note couldn't be saved on the watch.")
-        return "Saved note ${note.id}" + (where?.let { " with the current location" + (place?.let { p -> ", in $p" } ?: "") } ?: "") + "."
+        return "Saved note ${note.id}" + (where?.let { " with the current location" + (place?.let { p -> ", in $p" } ?: "") } ?: "") + "." +
+            (locationProblem?.let { " The place wasn't saved: $it" } ?: "")
     }
 
     private suspend fun recall(withDirections: Boolean): String {
-        val saved = withContext(Dispatchers.IO) { notes.all() }.reversed()
+        val saved = withContext(Dispatchers.IO) {
+            try {
+                notes.all()
+            } catch (e: Exception) {
+                throw ToolException("The notes on the watch couldn't be read.")
+            }
+        }.reversed()
         if (saved.isEmpty()) return "No notes are saved."
-        val here = if (withDirections && saved.any { it.latitude != null }) runCatching { currentLocation() }.getOrNull() else null
+        val here = if (withDirections && saved.any { it.latitude != null }) orNull { currentLocation() } else null
         val lines = saved.map { n ->
             val whereSaved = if (n.latitude != null && n.longitude != null) {
                 val directions = here?.let {
@@ -676,8 +749,9 @@ class WatchTools(private val context: Context) {
                     val bearing = ((result[1] % 360 + 360) % 360).roundToInt() % 360
                     ", ${distance(result[0])} away, bearing $bearing° (${compassPoint(bearing)}) from the wearer"
                 } ?: ""
-                " Saved at ${"%.5f".format(Locale.UK, n.latitude)}, ${"%.5f".format(Locale.UK, n.longitude)}" +
-                    (n.place?.let { ", in $it" } ?: "") + directions + "."
+                // Roughly where, for Claude; the exact point stays on the watch for directions.
+                " Place saved" + (n.place?.let { " in $it" } ?: " at about ${"%.3f".format(Locale.UK, n.latitude)}, ${"%.3f".format(Locale.UK, n.longitude)}") +
+                    directions + "."
             } else {
                 ""
             }
@@ -724,26 +798,13 @@ class WatchTools(private val context: Context) {
         }
     }
 
-    /** The latest value a sensor reports over a short settling time; [onAccuracy] hears its accuracy. */
-    private suspend fun settledReading(sm: SensorManager, sensor: Sensor, onAccuracy: (Int) -> Unit): FloatArray? {
-        var latest: FloatArray? = null
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                latest = event.values.clone()
-                onAccuracy(event.accuracy)
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = onAccuracy(accuracy)
-        }
-        sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
-        try {
-            delay(COMPASS_SETTLE_MS)
-            // A slow sensor gets a little longer to say anything at all.
-            withTimeoutOrNull(SENSOR_TIMEOUT_MS) { while (latest == null) delay(100) }
-        } finally {
-            sm.unregisterListener(listener)
-        }
-        return latest
+    /** The block's result, or null if it fails; cancellation still cancels. */
+    private suspend fun <T> orNull(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     /** Where the watch was lately, without waiting for a fix; null if it doesn't know or may not say. */
@@ -783,7 +844,10 @@ class WatchTools(private val context: Context) {
         private const val HEART_RATE_TIMEOUT_MS = 20_000L
         private const val STEPS_FLUSH_WAIT_MS = 1_500L
         private const val SENSOR_TIMEOUT_MS = 3_000L
-        private const val COMPASS_SETTLE_MS = 800L
+        private const val COMPASS_SETTLE_MS = 1_500L
+        private const val COMPASS_FLAT_WAIT_MS = 2_500L
+        private const val COMPASS_MAX_ERROR_DEGREES = 20
+        private const val FLAT_DEGREES = 30
         private const val MEDIA_SETTLE_MS = 700L
         private const val RECENT_LOCATION_MS = 30 * 60 * 1000L
         private const val MAX_EVENTS = 15

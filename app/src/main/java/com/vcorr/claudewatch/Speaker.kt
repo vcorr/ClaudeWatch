@@ -372,6 +372,21 @@ class Speaker(context: Context) {
         }
     }
 
+    /**
+     * Sets the media volume at the wearer's request: [change] gets their own level (not the floor
+     * this may have lifted it to while speaking) and the maximum, and returns the new level, which
+     * then stands. Returns the level set.
+     */
+    fun setUserVolume(change: (level: Int, max: Int) -> Int): Int {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val base = restoreVolume ?: audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val level = change(base, max).coerceIn(0, max)
+        restoreVolume = null
+        raisedTo = null
+        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0) }
+        return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+    }
+
     /** Puts the volume back, unless the wearer changed it meanwhile; their choice then stands. */
     private fun restoreQuietVolume() {
         val original = restoreVolume ?: return

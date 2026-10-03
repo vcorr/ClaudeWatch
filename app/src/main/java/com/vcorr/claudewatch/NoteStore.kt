@@ -5,11 +5,14 @@ import android.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
 
 /**
  * Things the wearer asked Claude to remember ("I parked on level 3"), optionally with where they
  * were. Kept on the watch only, in the app's private files (backups are off), and read back only
- * when Claude calls the recall tool. Oldest notes give way beyond [MAX_NOTES].
+ * when Claude calls the recall tool. Oldest notes give way beyond [MAX_NOTES]. Ids only ever grow,
+ * so an id Claude heard earlier never names a different note. One lock for the whole app, since
+ * each activity has its own tools.
  */
 class NoteStore(context: Context) {
 
@@ -22,12 +25,43 @@ class NoteStore(context: Context) {
         val place: String?,
     )
 
+    private class Contents(val nextId: Int, val notes: List<Note>)
+
     private val file = AtomicFile(File(context.applicationContext.filesDir, "notes.json"))
 
-    @Synchronized
-    fun all(): List<Note> = try {
-        val array = JSONArray(String(file.readFully()))
-        (0 until array.length()).map { i ->
+    /** The notes, oldest first; empty if there are none. Throws if the file can't be read. */
+    fun all(): List<Note> = synchronized(LOCK) { read().notes }
+
+    /** Saves a note and returns it, or null if it couldn't be written. */
+    fun add(text: String, latitude: Double?, longitude: Double?, place: String?): Note? = synchronized(LOCK) {
+        val contents = runCatching { read() }.getOrNull() ?: return null
+        val note = Note(contents.nextId, text, System.currentTimeMillis(), latitude, longitude, place)
+        note.takeIf { write(Contents(contents.nextId + 1, (contents.notes + note).takeLast(MAX_NOTES))) }
+    }
+
+    /** Removes the notes with these ids; returns how many went. */
+    fun remove(ids: Set<Int>): Int = synchronized(LOCK) {
+        val contents = runCatching { read() }.getOrNull() ?: return 0
+        val kept = contents.notes.filterNot { it.id in ids }
+        if (write(Contents(contents.nextId, kept))) contents.notes.size - kept.size else 0
+    }
+
+    fun clear(): Int = synchronized(LOCK) {
+        val contents = runCatching { read() }.getOrNull() ?: return 0
+        if (write(Contents(contents.nextId, emptyList()))) contents.notes.size else 0
+    }
+
+    // A missing file is simply no notes yet; any other failure throws, so nothing overwrites a
+    // file that merely couldn't be read.
+    private fun read(): Contents {
+        val text = try {
+            String(file.readFully())
+        } catch (e: FileNotFoundException) {
+            return Contents(1, emptyList())
+        }
+        val root = JSONObject(text)
+        val array = root.getJSONArray("notes")
+        val notes = (0 until array.length()).map { i ->
             val o = array.getJSONObject(i)
             Note(
                 id = o.getInt("id"),
@@ -38,36 +72,12 @@ class NoteStore(context: Context) {
                 place = o.optString("place").ifBlank { null },
             )
         }
-    } catch (e: Exception) {
-        // No file yet, or one that can't be read: nothing remembered.
-        emptyList()
+        return Contents(maxOf(root.optInt("nextId", 1), (notes.maxOfOrNull { it.id } ?: 0) + 1), notes)
     }
 
-    /** Saves a note and returns it, or null if it couldn't be written. */
-    @Synchronized
-    fun add(text: String, latitude: Double?, longitude: Double?, place: String?): Note? {
-        val notes = all()
-        val note = Note((notes.maxOfOrNull { it.id } ?: 0) + 1, text, System.currentTimeMillis(), latitude, longitude, place)
-        return note.takeIf { write((notes + note).takeLast(MAX_NOTES)) }
-    }
-
-    /** Removes the notes with these ids; returns how many went. */
-    @Synchronized
-    fun remove(ids: Set<Int>): Int {
-        val notes = all()
-        val kept = notes.filterNot { it.id in ids }
-        return if (write(kept)) notes.size - kept.size else 0
-    }
-
-    @Synchronized
-    fun clear(): Int {
-        val count = all().size
-        return if (write(emptyList())) count else 0
-    }
-
-    private fun write(notes: List<Note>): Boolean {
+    private fun write(contents: Contents): Boolean {
         val array = JSONArray()
-        notes.forEach { n ->
+        contents.notes.forEach { n ->
             array.put(
                 JSONObject()
                     .put("id", n.id)
@@ -79,11 +89,13 @@ class NoteStore(context: Context) {
                     }
             )
         }
-        return file.writeAll(array.toString().toByteArray())
+        val root = JSONObject().put("nextId", contents.nextId).put("notes", array)
+        return file.writeAll(root.toString().toByteArray())
     }
 
     companion object {
         const val MAX_NOTES = 50
         const val MAX_LENGTH = 500
+        private val LOCK = Any()
     }
 }

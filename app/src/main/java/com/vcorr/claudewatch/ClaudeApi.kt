@@ -40,8 +40,8 @@ object ClaudeApi {
             "controlling music and the volume, reading the watch's notifications (only when the wearer " +
             "asks about them), and keeping notes the wearer asks you to remember, " +
             "including places such as where they parked. Use one when the question " +
-            "needs it, then give the answer itself rather than describing the tool. When you have set " +
-            "a timer or alarm, say plainly what you set. Use web search only " +
+            "needs it, then give the answer itself rather than describing the tool. When you have asked " +
+            "the Clock app for a timer or alarm, say what you asked it to set. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
             "Don't read out web addresses."

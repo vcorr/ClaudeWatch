@@ -160,7 +160,18 @@ class MainActivity : Activity() {
         // A fresh start asks the recogniser for Finnish again (the speaker decides its half afresh).
         Language.finnishHeard = true
         speaker = Speaker(this)
-        watchTools = WatchTools(this)
+        watchTools = WatchTools(this).apply {
+            speaker = this@MainActivity.speaker
+            // The Clock app may show its screen for a timer; coming back from it mustn't start
+            // listening. If it shows nothing, the flag lapses rather than catching a later exit.
+            beforeLeaving = {
+                leavingForOwnScreen = true
+                scope.launch {
+                    delay(LEAVING_LAPSE_MS)
+                    if (foreground) leavingForOwnScreen = false
+                }
+            }
+        }
         StepsService.register(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
 
@@ -898,6 +909,7 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val AUTO_CLOSE_MS = 8_000L
+        const val LEAVING_LAPSE_MS = 3_000L
         const val VOICE_DECISION_MS = 4_000L
         // Said by the English voice, so in English only.
         const val ENGLISH_NOTE = "This watch can't do Finnish just now (%s). Begin your reply with one short " +
