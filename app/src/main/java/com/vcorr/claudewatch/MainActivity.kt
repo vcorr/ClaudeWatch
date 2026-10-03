@@ -876,7 +876,6 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val AUTO_CLOSE_MS = 8_000L
-        const val OVERLAY_FADE_MS = 250L
         const val PARTIAL_CHARS = 70
         const val PREFS = "claudewatch"
     }
