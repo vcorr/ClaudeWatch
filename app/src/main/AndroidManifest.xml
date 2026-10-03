@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Watch tools Claude can call: location and weather, calendar, heart rate. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission
+        android:name="android.permission.BODY_SENSORS"
+        android:maxSdkVersion="35" />
+    <!-- Replaces BODY_SENSORS for apps targeting Android 16. -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+
     <!-- API 30+ hides these from apps that don't declare them; the voice test needs to see them. -->
     <queries>
         <intent>

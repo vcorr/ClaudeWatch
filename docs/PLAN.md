@@ -2,7 +2,7 @@
 
 **Goal:** a Claude voice chat on a Samsung Galaxy Watch, for carrying on a conversation when the phone and computer are out of reach. Speak, hear Claude answer, keep going hands-free. English only. One user, sideloaded; no Play Store release.
 
-**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents, health data or avatars; a phone companion app.
+**Not goals:** replacing Gemini as the system assistant; syncing with claude.ai conversations (no public API for that); agents or avatars; health history (live heart rate is in, by the owner's choice on 3 Oct 2026); a phone companion app.
 
 ## Constraints that shape the plan
 
@@ -154,7 +154,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Views for now; Compose for Wear OS Material 3 after Phase 3 | Voice first; the voice screen is small, so rebuilding it later is cheap |
 | Speech in, as tested | In-app `SpeechRecognizer` on Google's service (`com.google.android.tts`), in the watch's English, with live words, and a fresh recogniser for every listen; the system dialog only if that fails | The 0.4.20 trials on the Galaxy Watch 9 (Android 17): en-US, en-GB and the watch language all heard speech in-app; without live words it heard nothing; offline en-US is unavailable; there is no separate on-device recogniser |
-| Current information | Anthropic's server-side web search tool (`web_search_20250305`, at most 3 searches a reply, localised by time zone only), plus the date and time in the system prompt; cited sites shown under the reply, not spoken; retried without search if the API refuses the tool | Haiku has no internet access and doesn't know the date. Web search costs $10 per 1,000 searches plus the result tokens ([docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)) |
+| Current information | Client-side watch tools Claude calls only when a question needs them: location (approximate), weather (Open-Meteo, free, no key), watch status, live heart rate, calendar. Anthropic's web search only when the wearer asks for a search, at most once a reply. The date and time go in the system prompt; cited sites and Open-Meteo show under the reply, unspoken | Haiku has no internet access and doesn't know the date. Watch tools cost only tokens; web search is $10 per 1,000 searches plus result tokens ([docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)), so it waits to be asked. Steps today need Health Services' passive monitoring, a later build |
 | Look | The "ClaudeWatch voice states" design canvas (claude.ai, private): black ground, one accent, Clawd on Idle and Thinking; built in views in 0.4, carried into Compose in 2b | One face per state of the voice loop, settled on a canvas before building |
 | Phone companion | Removed (2 Oct 2026), with the watch's Data Layer listener | The browser key page replaced it, and Android's unverified-developer block made sideloading it wait 24 hours |
 | Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); adb remains an alternative | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |

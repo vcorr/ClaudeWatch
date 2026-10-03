@@ -4,6 +4,7 @@ import android.util.Log
 import com.vcorr.claudewatch.core.Role
 import com.vcorr.claudewatch.core.SpokenText
 import com.vcorr.claudewatch.core.Turn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -30,27 +31,49 @@ object ClaudeApi {
             "by text-to-speech and shown on a small screen, so answer in plain spoken sentences: no " +
             "markdown, lists, headings, code blocks, emoji or URLs. Keep replies short, usually one to " +
             "three sentences, unless they ask for more detail. If a request is unclear, ask a brief " +
-            "follow-up question. You can search the web: do so when the answer depends on current " +
-            "information such as news, weather, prices, opening hours or recent events, and then give " +
-            "the answer itself rather than describing the search. Don't read out web addresses."
+            "follow-up question. You have tools that read the watch: its location, the weather, its " +
+            "battery and alarms, the wearer's heart rate and their calendar. Use one when the question " +
+            "needs it, then give the answer itself rather than describing the tool. Use web search only " +
+            "when the wearer asks you to search or look something up; otherwise answer from what you " +
+            "know, and if current information would help, say so briefly and offer to look it up. " +
+            "Don't read out web addresses."
 
-    // A few searches cover a spoken question; the cap bounds the cost of one reply.
-    private const val MAX_SEARCHES = 3
+    // Paid web search runs only when asked for, and once per reply at most.
+    private const val MAX_SEARCHES = 1
 
-    /** One question with no history, used by the voice test. */
-    suspend fun ask(prompt: String, apiKey: String): String = reply(listOf(Turn(Role.USER, prompt)), apiKey).text
+    // Rounds of tool calls in one reply before giving up; a spoken question rarely needs more than two.
+    private const val MAX_ROUNDS = 5
 
-    /** Sends the conversation and returns Claude's reply, ready to show and speak. */
-    suspend fun reply(history: List<Turn>, apiKey: String): Reply = withContext(Dispatchers.IO) {
+    /** One question with no history and no tools, used by the voice test. */
+    suspend fun ask(prompt: String, apiKey: String): String =
+        reply(listOf(Turn(Role.USER, prompt)), apiKey, tools = null).text
+
+    /**
+     * Sends the conversation and returns Claude's reply, ready to show and speak. When Claude asks
+     * for a watch tool, it runs here and the answer goes back, until Claude replies in words.
+     * [onProgress] hears what the watch is doing meanwhile, such as "Checking the weather".
+     */
+    suspend fun reply(
+        history: List<Turn>,
+        apiKey: String,
+        tools: WatchTools?,
+        onProgress: (String) -> Unit = {},
+    ): Reply = withContext(Dispatchers.IO) {
         try {
-            request(history, apiKey, withSearch = true)
+            converse(history, apiKey, tools, withSearch = tools != null, onProgress)
         } catch (e: SearchUnavailableException) {
             // If this account or model can't use web search, answer without it rather than fail.
-            request(history, apiKey, withSearch = false)
+            converse(history, apiKey, tools, withSearch = false, onProgress)
         }
     }
 
-    private fun request(history: List<Turn>, apiKey: String, withSearch: Boolean): Reply {
+    private suspend fun converse(
+        history: List<Turn>,
+        apiKey: String,
+        tools: WatchTools?,
+        withSearch: Boolean,
+        onProgress: (String) -> Unit,
+    ): Reply {
         val messages = JSONArray()
         history.forEach { turn ->
             messages.put(
@@ -59,20 +82,66 @@ object ClaudeApi {
                     .put("content", turn.text)
             )
         }
+        val toolList = JSONArray()
+        if (tools != null) {
+            for (i in 0 until tools.definitions.length()) toolList.put(tools.definitions.get(i))
+        }
+        if (withSearch) {
+            toolList.put(
+                JSONObject()
+                    .put("type", "web_search_20250305")
+                    .put("name", "web_search")
+                    .put("max_uses", MAX_SEARCHES)
+                    // The time zone alone localises results without sending a location.
+                    .put("user_location", JSONObject().put("type", "approximate").put("timezone", TimeZone.getDefault().id))
+            )
+        }
+
+        val used = mutableSetOf<String>()
+        repeat(MAX_ROUNDS) {
+            val json = post(messages, toolList, apiKey, withSearch)
+            val stopReason = json.optString("stop_reason")
+            val content = json.getJSONArray("content")
+            when (stopReason) {
+                "tool_use" -> {
+                    // Claude wants the watch: send its turn back unchanged, then the tools' answers.
+                    messages.put(JSONObject().put("role", "assistant").put("content", content))
+                    val results = JSONArray()
+                    for (i in 0 until content.length()) {
+                        val block = content.getJSONObject(i)
+                        if (block.optString("type") != "tool_use") continue
+                        val name = block.optString("name")
+                        used += name
+                        onProgress(tools?.progress(name) ?: "Thinking")
+                        val result = JSONObject().put("type", "tool_result").put("tool_use_id", block.optString("id"))
+                        try {
+                            result.put("content", tools?.run(name, block.optJSONObject("input") ?: JSONObject()) ?: "No tools available.")
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            val reason = if (e is WatchTools.ToolException) e.message else "it failed (${e.javaClass.simpleName})"
+                            result.put("content", "Couldn't get that: $reason").put("is_error", true)
+                        }
+                        results.put(result)
+                    }
+                    messages.put(JSONObject().put("role", "user").put("content", results))
+                    onProgress("Thinking")
+                }
+                // The server paused a long search; sending its turn back lets it carry on.
+                "pause_turn" -> messages.put(JSONObject().put("role", "assistant").put("content", content))
+                else -> return finish(json, used)
+            }
+        }
+        return Reply("Sorry, that took too many steps. Could you ask it more simply?", emptyList())
+    }
+
+    private fun post(messages: JSONArray, tools: JSONArray, apiKey: String, withSearch: Boolean): JSONObject {
         val body = JSONObject()
             .put("model", MODEL)
             .put("max_tokens", MAX_TOKENS)
             .put("system", "$SYSTEM_PROMPT ${now()}")
             .put("messages", messages)
-        if (withSearch) {
-            val search = JSONObject()
-                .put("type", "web_search_20250305")
-                .put("name", "web_search")
-                .put("max_uses", MAX_SEARCHES)
-                // The time zone alone localises results (weather, opening hours) without a location permission.
-                .put("user_location", JSONObject().put("type", "approximate").put("timezone", TimeZone.getDefault().id))
-            body.put("tools", JSONArray().put(search))
-        }
+        if (tools.length() > 0) body.put("tools", tools)
 
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -84,19 +153,19 @@ object ClaudeApi {
             // Searching adds a few seconds or more.
             readTimeout = 60_000
         }
-
         OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
 
         if (conn.responseCode == 401) throw InvalidApiKeyException()
-
         if (conn.responseCode != 200) {
             val err = conn.errorStream?.bufferedReader()?.readText() ?: "HTTP ${conn.responseCode}"
             val message = errorMessage(err, conn.responseCode)
             if (withSearch && conn.responseCode == 400 && message.contains("web_search")) throw SearchUnavailableException()
             error(message)
         }
+        return JSONObject(conn.inputStream.bufferedReader().readText())
+    }
 
-        val json = JSONObject(conn.inputStream.bufferedReader().readText())
+    private fun finish(json: JSONObject, used: Set<String>): Reply {
         val stopReason = json.optString("stop_reason")
         if (stopReason == "refusal") return Reply("Sorry, I can't help with that one.", emptyList())
 
@@ -106,23 +175,23 @@ object ClaudeApi {
         val blocks = (0 until content.length()).map { content.getJSONObject(it) }
         val lastResult = blocks.indexOfLast { it.optString("type") == "web_search_tool_result" }
         val texts = blocks.filter { it.optString("type") == "text" }
-        // If nothing follows the last search (a paused turn), all the text is better than none.
         val answer = blocks.drop(lastResult + 1).filter { it.optString("type") == "text" }.ifEmpty { texts }
         val text = answer.joinToString("") { it.optString("text") }.trim()
 
-        // Where the answer came from, shown under the reply.
-        val sources = answer
+        // Where the answer came from, shown under the reply: cited sites, and the weather service,
+        // whose free licence asks for attribution.
+        val cited = answer
             .flatMap { block ->
                 val citations = block.optJSONArray("citations") ?: JSONArray()
                 (0 until citations.length()).mapNotNull { citations.optJSONObject(it)?.optString("url") }
             }
             .mapNotNull { url -> runCatching { URL(url).host.removePrefix("www.") }.getOrNull() }
-            .distinct()
+        val sources = (cited + listOfNotNull("Open-Meteo".takeIf { "get_weather" in used })).distinct()
 
         val result = if (stopReason == "max_tokens") SpokenText.upToLastSentence(text) else text
         val searches = json.optJSONObject("usage")?.optJSONObject("server_tool_use")?.optInt("web_search_requests") ?: 0
-        // Counts only, never content, to check replies stay short and searches stay few.
-        Log.d(TAG, "reply chars=${result.length} stop=$stopReason searches=$searches")
+        // Counts and tool names only, never content.
+        Log.d(TAG, "reply chars=${result.length} stop=$stopReason searches=$searches tools=$used")
         return Reply(result, sources)
     }
 

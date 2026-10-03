@@ -92,6 +92,7 @@ class MainActivity : Activity() {
     private var turnToken = 0
 
     private val conversation = Conversation()
+    private lateinit var watchTools: WatchTools
     private lateinit var speaker: Speaker
     private var inAppInput: InAppSpeechInput? = null
     private lateinit var dialogInput: DialogSpeechInput
@@ -102,6 +103,7 @@ class MainActivity : Activity() {
     private var foreground = false
     private var listenOnLaunch = false
     private var listenAfterPermission = false
+    private var toolPermissionsAsked = false
 
     private var setupServer: KeySetupServer? = null
     private var setupPort = 0
@@ -137,6 +139,7 @@ class MainActivity : Activity() {
         tvSetup = findViewById(R.id.tv_setup)
 
         speaker = Speaker(this)
+        watchTools = WatchTools(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
 
         val density = resources.displayMetrics.density
@@ -233,7 +236,11 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_MIC || !listenAfterPermission) return
         listenAfterPermission = false
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+        toolPermissionsAsked = true
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().apply {
+            permissions.forEach { putBoolean("asked:$it", true) }
+        }.apply()
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startListening(followUp = false)
         } else {
             goIdle("Microphone permission is needed to talk", problem = true)
@@ -251,6 +258,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun toolPermissionsToAsk(): Array<String> = WatchTools.permissions()
+        .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED && !alreadyAsked(it) }
+        .toTypedArray()
+
+    // Each permission is asked for once; if refused, the tool tells Claude how the wearer can allow it.
+    private fun alreadyAsked(permission: String): Boolean =
+        getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("asked:$permission", false)
+
     private fun currentInput(): SpeechInput =
         if (!useDialog && InAppSpeechInput.isAvailable(this)) {
             inAppInput ?: InAppSpeechInput(this).also { inAppInput = it }
@@ -261,7 +276,15 @@ class MainActivity : Activity() {
     private fun startListening(followUp: Boolean) {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             listenAfterPermission = true
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC)
+            // The watch tools' permissions are asked for at the same time, once.
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO) + toolPermissionsToAsk(), REQ_MIC)
+            return
+        }
+        if (!toolPermissionsAsked && toolPermissionsToAsk().isNotEmpty()) {
+            // Installed before the watch tools existed: ask for theirs once, then listen.
+            toolPermissionsAsked = true
+            listenAfterPermission = true
+            requestPermissions(toolPermissionsToAsk(), REQ_MIC)
             return
         }
         val token = ++turnToken
@@ -352,7 +375,9 @@ class MainActivity : Activity() {
                 return@launch
             }
             try {
-                val reply = ClaudeApi.reply(conversation.forRequest(), key)
+                val reply = ClaudeApi.reply(conversation.forRequest(), key, watchTools) { label ->
+                    runOnUiThread { if (token == turnToken && state == State.THINKING) tvStatus.text = label }
+                }
                 if (token != turnToken) return@launch
                 conversation.addAssistant(reply.text)
                 shownQuestion = text
@@ -631,5 +656,6 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val PARTIAL_CHARS = 70
+        const val PREFS = "claudewatch"
     }
 }
