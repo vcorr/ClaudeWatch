@@ -354,12 +354,12 @@ class MainActivity : Activity() {
             try {
                 val reply = ClaudeApi.reply(conversation.forRequest(), key)
                 if (token != turnToken) return@launch
-                conversation.addAssistant(reply)
+                conversation.addAssistant(reply.text)
                 shownQuestion = text
-                shownReply = reply
-                tvReply.text = reply
+                shownReply = reply.text
+                tvReply.text = reply.display
                 scrollReply.scrollTo(0, 0)
-                speak(reply, token)
+                speak(reply.text, token)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: InvalidApiKeyException) {
