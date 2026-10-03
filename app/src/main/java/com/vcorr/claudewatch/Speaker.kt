@@ -5,12 +5,14 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import com.vcorr.claudewatch.core.SpokenText
+import java.io.File
 import java.util.Locale
 
 /**
@@ -64,7 +66,11 @@ class Speaker(context: Context) {
     // Engines to try, best first: Google's (installed beside Samsung's on Galaxy Watches), then
     // the watch's default (null). The one with the best Finnish wins (see [finnishRank]); the best
     // so far is kept running meanwhile rather than restarted.
-    private val candidates: List<String?> = listOfNotNull(GOOGLE_TTS.takeIf { installed(it) }) + listOf<String?>(null)
+    private val candidates: List<String?> = buildList {
+        if (installed(GOOGLE_TTS)) add(GOOGLE_TTS)
+        // The default, unless it is Google's again.
+        if (isEmpty() || defaultEngine() != GOOGLE_TTS) add(null)
+    }
     private var best: TextToSpeech? = null
     private var bestEngine: String? = null
     private var bestRank = NOT_USABLE
@@ -131,16 +137,21 @@ class Speaker(context: Context) {
     }
 
     /**
-     * Asks the engine to download the Finnish voice it offers: selecting a voice that isn't
-     * installed starts its download (see [TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED]). This run
-     * stays English; a later one finds the voice installed.
+     * Asks the engine to download the Finnish voice it offers: using a voice that isn't installed
+     * for synthesis starts its download (see [TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED]), so
+     * a word is synthesised silently to a file. This run stays English; a later one finds the voice
+     * installed. The engine may wait for Wi-Fi to download.
      */
     private fun fetchFinnish() {
         val tts = tts ?: return
         val voice = finnishToFetch ?: return
-        runCatching { tts.voice = voice }
         speakingFinnish = null
-        description += ", fetching ${voice.name}"
+        if (runCatching { tts.setVoice(voice) }.getOrNull() != TextToSpeech.SUCCESS) return
+        val file = File(appContext.cacheDir, "finnish-voice.wav")
+        // Its callbacks carry an id nothing waits for, so finishIfLast ignores them.
+        if (runCatching { tts.synthesizeToFile("Hei.", Bundle(), file, "fetch-finnish") }.getOrNull() == TextToSpeech.SUCCESS) {
+            description += ", fetching ${voice.name}"
+        }
     }
 
     private fun becomeReady() {
@@ -174,12 +185,17 @@ class Speaker(context: Context) {
         tts.setAudioAttributes(attributes)
         val voices = runCatching { tts.voices }.getOrNull().orEmpty()
         englishVoice = bestVoice(voices, locale)
-        finnishVoice = bestVoice(voices, Language.FINNISH)
-        finnishToFetch = voices.firstOrNull { it.locale.sameLanguage(Language.FINNISH) && it.notInstalled }
+        val finnishVoices = voices.filter { it.locale.sameLanguage(Language.FINNISH) }
+        val finnishSaysAvailable = available(tts, Language.FINNISH)
+        // An online voice may be marked as needing a download while the language works over the
+        // network; the engine's own word decides.
+        finnishVoice = bestVoice(finnishVoices, Language.FINNISH)
+            ?: finnishVoices.firstOrNull { it.isNetworkConnectionRequired && finnishSaysAvailable }
+        finnishToFetch = finnishVoices.filter { it.notInstalled }.minByOrNull { it.isNetworkConnectionRequired }
         val hasEnglish = englishVoice != null || available(tts, locale) || available(tts, Locale.ENGLISH)
-        // Taken at its word only by an engine that lists no Finnish voice, like Samsung's, which
-        // lists none at all: one that lists Finnish only as a download would fail to speak it.
-        val finnishAvailable = voices.none { it.locale.sameLanguage(Language.FINNISH) } && available(tts, Language.FINNISH)
+        // Taken at its word alone only by an engine that lists no Finnish voice, like Samsung's,
+        // which lists none at all: one that lists Finnish only as a download would fail to speak it.
+        val finnishAvailable = finnishVoices.isEmpty() && finnishSaysAvailable
         finnishRank = when {
             finnishVoice?.isNetworkConnectionRequired == false -> FINNISH_STORED
             finnishVoice != null || finnishAvailable -> FINNISH_ONLINE
@@ -216,7 +232,8 @@ class Speaker(context: Context) {
         if (speakingFinnish == finnish) return
         speakingFinnish = finnish
         if (finnish) {
-            finnishVoice?.let { tts.voice = it } ?: tts.setLanguage(Language.FINNISH)
+            val voice = finnishVoice
+            if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) tts.setLanguage(Language.FINNISH)
         } else {
             englishVoice?.let { tts.voice = it } ?: run {
                 if (tts.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) tts.setLanguage(Locale.ENGLISH)
@@ -365,6 +382,10 @@ class Speaker(context: Context) {
         runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, original, 0) }
     }
 
+    private fun defaultEngine(): String? = runCatching {
+        android.provider.Settings.Secure.getString(appContext.contentResolver, android.provider.Settings.Secure.TTS_DEFAULT_SYNTH)
+    }.getOrNull()
+
     private fun installed(pkg: String): Boolean = try {
         appContext.packageManager.getPackageInfo(pkg, 0)
         true
@@ -394,4 +415,5 @@ private fun Locale.sameCountry(other: Locale) = iso3Country() == other.iso3Count
 
 private fun Locale.iso3Language() = runCatching { isO3Language }.getOrDefault(language)
 
-private fun Locale.iso3Country() = runCatching { isO3Country }.getOrDefault(country)
+// A three-letter region is already in that form (and Android would misread it).
+private fun Locale.iso3Country() = if (country.length == 3) country else runCatching { isO3Country }.getOrDefault(country)

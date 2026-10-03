@@ -157,6 +157,8 @@ class MainActivity : Activity() {
         layoutSetup = findViewById(R.id.layout_setup)
         tvSetup = findViewById(R.id.tv_setup)
 
+        // A fresh start asks the recogniser for Finnish again (the speaker decides its half afresh).
+        Language.finnishHeard = true
         speaker = Speaker(this)
         watchTools = WatchTools(this)
         StepsService.register(this)

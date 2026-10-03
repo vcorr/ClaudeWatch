@@ -38,6 +38,7 @@ class ProbeActivity : Activity() {
     private var inApp: InAppSpeechInput? = null
     private var recognizer: SpeechRecognizer? = null
     private var speaker: Speaker? = null
+    private val engineProbes = mutableListOf<TextToSpeech>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,28 +131,32 @@ class ProbeActivity : Activity() {
     /** Lists one engine's English and Finnish voices: stored on the watch, online, or not yet downloaded. */
     private fun describeEngine(pkg: String, label: String) {
         var probe: TextToSpeech? = null
-        probe = TextToSpeech(this, { status ->
-            val engine = probe ?: return@TextToSpeech
+        val created = TextToSpeech(applicationContext, { status ->
+            // A failure can arrive before the constructor has returned.
             if (status != TextToSpeech.SUCCESS) {
                 log("$label: failed to start ($status)")
-            } else {
-                val voices = runCatching { engine.voices }.getOrNull().orEmpty()
-                fun summary(language: String): String {
-                    val matching = voices.filter { runCatching { it.locale.isO3Language }.getOrNull() == language }
-                    val (missing, installed) = matching.partition { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in it.features.orEmpty() }
-                    val online = installed.count { it.isNetworkConnectionRequired }
-                    return "${installed.size - online} stored, $online online, ${missing.size} to download"
-                }
-                val check = when (runCatching { engine.isLanguageAvailable(Language.FINNISH) }.getOrNull()) {
-                    null -> "failed"
-                    TextToSpeech.LANG_MISSING_DATA -> "needs download"
-                    TextToSpeech.LANG_NOT_SUPPORTED -> "not supported"
-                    else -> "available"
-                }
-                log("$label: ${voices.size} voices; English ${summary("eng")}; Finnish ${summary("fin")}, says $check")
+                return@TextToSpeech
             }
+            val engine = probe ?: return@TextToSpeech
+            val voices = runCatching { engine.voices }.getOrNull().orEmpty()
+            fun summary(language: String): String {
+                val matching = voices.filter { runCatching { it.locale.isO3Language }.getOrNull() == language }
+                val (missing, installed) = matching.partition { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in it.features.orEmpty() }
+                val online = installed.count { it.isNetworkConnectionRequired }
+                return "${installed.size - online} stored, $online online, ${missing.size} to download"
+            }
+            val check = when (runCatching { engine.isLanguageAvailable(Language.FINNISH) }.getOrNull()) {
+                null -> "failed"
+                TextToSpeech.LANG_MISSING_DATA -> "needs download"
+                TextToSpeech.LANG_NOT_SUPPORTED -> "not supported"
+                else -> "available"
+            }
+            log("$label: ${voices.size} voices; English ${summary("eng")}; Finnish ${summary("fin")}, says $check")
             engine.shutdown()
+            engineProbes.remove(engine)
         }, pkg)
+        probe = created
+        engineProbes += created
     }
 
     // ── Interactive tests ───────────────────────────────────
@@ -304,9 +309,12 @@ class ProbeActivity : Activity() {
     private fun testSpeech() {
         val sp = speaker ?: Speaker(this).also { speaker = it }
         log("Speaking a sample. Was it loud and clear enough?")
-        sp.speak(Language.say("This is how Claude will sound on your watch.", "Näin Claude kuulostaa kellossasi.")) {
-            log("Voice: ${sp.description}")
-            log("Conversation: ${if (Language.finnish) "Finnish" else "English"} (Finnish voice ${yesNo(Language.finnishSpoken)}, Finnish listening ${yesNo(Language.finnishHeard)})")
+        // In the language the speaker settles on.
+        sp.whenDecided {
+            sp.speak(Language.say("This is how Claude will sound on your watch.", "Näin Claude kuulostaa kellossasi.")) {
+                log("Voice: ${sp.description}")
+                log("Conversation: ${if (Language.finnish) "Finnish" else "English"} (Finnish voice ${yesNo(Language.finnishSpoken)}, Finnish listening ${yesNo(Language.finnishHeard)})")
+            }
         }
     }
 
@@ -326,6 +334,8 @@ class ProbeActivity : Activity() {
         stopTrials()
         speaker?.shutdown()
         tts?.shutdown()
+        engineProbes.forEach { it.shutdown() }
+        engineProbes.clear()
         scope.cancel()
     }
 
