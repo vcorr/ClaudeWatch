@@ -7,10 +7,10 @@ The app needs your own Anthropic API key. The key is **never** built into the ap
 ## Install from the phone (no computer)
 
 1. **Watch:** Settings → About watch → Software information, tap **Software version** five times. Then **Settings → Developer options**: turn on **ADB debugging** and **Wireless debugging**. Put the watch on the same Wi-Fi as the phone.
-2. **Phone:** in the browser, signed in to GitHub, open the latest successful run on the [Actions page](../../actions), download the `ClaudeWatch-0.3.N` file listed under *Artifacts* (N is the build number) and unzip it with My Files.
-3. Install a phone ADB app such as **Bugjaeger** or **Wear Installer 2**. Connect it to the watch's IP address (shown under Wireless debugging), pair with the code the watch shows, tap *Always allow* on the watch, and install `ClaudeWatch-0.3.N.apk` *through that app*. Tapping the APK in My Files won't work: it is a watch app, so the phone refuses it. Installs over ADB are exempt from Google's unverified-developer block, so there's no waiting period.
+2. **Phone:** in the browser, signed in to GitHub, open the latest successful run on the [Actions page](../../actions), download the `ClaudeWatch-0.4.N` file listed under *Artifacts* (N is the build number) and unzip it with My Files.
+3. Install a phone ADB app such as **Bugjaeger** or **Wear Installer 2**. Connect it to the watch's IP address (shown under Wireless debugging), pair with the code the watch shows, tap *Always allow* on the watch, and install `ClaudeWatch-0.4.N.apk` *through that app*. Tapping the APK in My Files won't work: it is a watch app, so the phone refuses it. Installs over ADB are exempt from Google's unverified-developer block, so there's no waiting period.
 4. **Key:** open ClaudeWatch on the watch. With no key set, it shows an address such as `http://192.168.1.23:8080` and a six-digit PIN. Open that address in the phone's browser, paste the API key and the PIN, and tap **Save to watch**. The watch confirms and the page closes itself down.
-5. Opening the app starts listening: speak, and Claude answers on screen and out loud, then listens for a follow-up. **Test** on the main screen shows the build version and runs voice diagnostics.
+5. Opening the app starts listening: speak, and Claude answers on screen and out loud, then listens for a follow-up while a ring around the microphone runs down. Tap the square to stop it talking. **Long-press the microphone** for the build version and voice diagnostics.
 
 The key page exists only while the watch shows it, needs the PIN, and stops after five wrong PINs. It travels over your local Wi-Fi unencrypted, so use it on your home network, not on public Wi-Fi. If Claude ever rejects the key, the watch shows the page again.
 
@@ -24,7 +24,7 @@ If an update fails to install with a signature error, uninstall the old version 
    ```sh
    adb pair <watch-ip>:<pairing-port>      # enter the pairing code
    adb connect <watch-ip>:<debug-port>     # the port shown on the Wireless debugging screen
-   adb install -r ClaudeWatch-0.3.N.apk
+   adb install -r ClaudeWatch-0.4.N.apk
    ```
 4. Or set the key from the Mac instead of the browser page. Copy the key so it is on the clipboard, then:
    ```sh

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Clawd, drawn from the block-character banner Claude Code prints at startup. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="54dp"
+    android:height="30dp"
+    android:viewportWidth="18"
+    android:viewportHeight="10">
+    <path
+        android:fillColor="@color/accent"
+        android:pathData="M3,0h12v2h-12z M3,2h2v2h-2z M6,2h6v2h-6z M13,2h2v2h-2z M1,4h16v2h-16z M3,6h12v2h-12z M4,8h1v2h-1z M6,8h1v2h-1z M11,8h1v2h-1z M13,8h1v2h-1z" />
+</vector>

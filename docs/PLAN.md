@@ -153,9 +153,10 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Views for now; Compose for Wear OS Material 3 after Phase 3 | Voice first; the voice screen is small, so rebuilding it later is cheap |
+| Look | The "ClaudeWatch voice states" design canvas (claude.ai, private): black ground, one accent, Clawd on Idle and Thinking; built in views in 0.4, carried into Compose in 2b | One face per state of the voice loop, settled on a canvas before building |
 | Phone companion | Removed (2 Oct 2026), with the watch's Data Layer listener | The browser key page replaced it, and Android's unverified-developer block made sideloading it wait 24 hours |
 | Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); adb remains an alternative | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
-| Versioning | `ClaudeWatch-<claudewatch.version>.<CI build number>` (e.g. 0.3.41) for the artifact, the APK file, `versionName` and the Test screen; `versionCode` is the build number | One name to match a download to what's on the watch; rising codes let Android treat builds as updates |
+| Versioning | `ClaudeWatch-<claudewatch.version>.<CI build number>` (e.g. 0.4.41) for the artifact, the APK file, `versionName` and the diagnostics screen; `versionCode` is the build number | One name to match a download to what's on the watch; rising codes let Android treat builds as updates |
 | Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
 
 ## Owner's answers (1 October 2026)

@@ -4,105 +4,225 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    android:background="@color/ground">
+
+    <!--
+        Voice chat. One column whose parts MainActivity shows or hides per state, following the
+        "ClaudeWatch voice states" design: Idle, Listening, Thinking, Speaking, Follow-up and
+        Didn't catch that. Not boxed, so it can use the round screen; the padding keeps it clear
+        of the edge.
+    -->
+    <LinearLayout
+        android:id="@+id/layout_voice"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="26dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="18dp">
+
+        <ImageView
+            android:id="@+id/iv_clawd"
+            android:layout_width="54dp"
+            android:layout_height="30dp"
+            android:layout_marginBottom="6dp"
+            android:contentDescription="@null"
+            android:src="@drawable/clawd" />
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_lead"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingHorizontal="12dp"
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tv_main"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:lineSpacingMultiplier="1.1"
+            android:maxLines="3"
+            android:textColor="@color/ink"
+            android:textSize="15sp" />
+
+        <FrameLayout
+            android:id="@+id/mic_area"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginVertical="8dp">
+
+            <View
+                android:id="@+id/ring_outer"
+                android:layout_width="94dp"
+                android:layout_height="94dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_ring" />
+
+            <View
+                android:id="@+id/ring_inner"
+                android:layout_width="78dp"
+                android:layout_height="78dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_ring_dim" />
+
+            <com.vcorr.claudewatch.RingView
+                android:id="@+id/ring_progress"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:layout_gravity="center" />
+
+            <ImageButton
+                android:id="@+id/btn_talk"
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_mic_filled"
+                android:contentDescription="Talk to Claude"
+                android:scaleType="center"
+                android:src="@drawable/ic_mic" />
+
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="3"
+            android:textColor="@color/ink"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_caption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Tap to try again"
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
+
+        <ScrollView
+            android:id="@+id/scroll_reply"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="4dp"
+            android:layout_weight="1"
+            android:fadingEdgeLength="28dp"
+            android:requiresFadingEdge="vertical"
+            android:scrollbars="none">
+
+            <TextView
+                android:id="@+id/tv_reply"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.15"
+                android:paddingVertical="6dp"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+        </ScrollView>
+
+        <ImageButton
+            android:id="@+id/btn_stop"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_mic_outline"
+            android:contentDescription="Stop speaking"
+            android:scaleType="center"
+            android:src="@drawable/ic_stop"
+            android:tint="@color/accent" />
+
+        <Button
+            android:id="@+id/btn_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_pill"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="16dp"
+            android:stateListAnimator="@null"
+            android:text="Cancel"
+            android:textAllCaps="false"
+            android:textColor="@color/ink"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:id="@+id/row_actions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_type"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:background="@drawable/bg_pill"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="14dp"
+                android:stateListAnimator="@null"
+                android:text="Type"
+                android:textAllCaps="false"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
+
+            <ImageButton
+                android:id="@+id/btn_talk_small"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_mic_filled"
+                android:contentDescription="Talk to Claude"
+                android:scaleType="center"
+                android:src="@drawable/ic_mic"
+                android:tint="@color/ink_on_accent" />
+
+            <Button
+                android:id="@+id/btn_new"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_pill"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="14dp"
+                android:stateListAnimator="@null"
+                android:text="New"
+                android:textAllCaps="false"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:boxedEdges="all">
-
-        <!-- Voice chat: status, transcript, one big button -->
-        <LinearLayout
-            android:id="@+id/layout_voice"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/tv_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:text="Tap to talk"
-                android:textColor="#B0B0B0"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/tv_question"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="2"
-                android:paddingTop="2dp"
-                android:textColor="#8A8A8A"
-                android:textSize="12sp" />
-
-            <ScrollView
-                android:id="@+id/scroll_reply"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1">
-
-                <TextView
-                    android:id="@+id/tv_reply"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="4dp"
-                    android:paddingBottom="4dp"
-                    android:textColor="@android:color/white"
-                    android:textSize="15sp" />
-
-            </ScrollView>
-
-            <Button
-                android:id="@+id/btn_talk"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Talk"
-                android:textSize="16sp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/btn_type"
-                    style="?android:attr/borderlessButtonStyle"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:minHeight="0dp"
-                    android:padding="0dp"
-                    android:layout_weight="1"
-                    android:text="Type"
-                    android:textSize="11sp" />
-
-                <Button
-                    android:id="@+id/btn_new"
-                    style="?android:attr/borderlessButtonStyle"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:minHeight="0dp"
-                    android:padding="0dp"
-                    android:layout_weight="1"
-                    android:text="New"
-                    android:textSize="11sp" />
-
-                <Button
-                    android:id="@+id/btn_probe"
-                    style="?android:attr/borderlessButtonStyle"
-                    android:layout_width="0dp"
-                    android:layout_height="36dp"
-                    android:minHeight="0dp"
-                    android:padding="0dp"
-                    android:layout_weight="1"
-                    android:text="Test"
-                    android:textSize="11sp" />
-
-            </LinearLayout>
-
-        </LinearLayout>
 
         <!-- Typed question -->
         <LinearLayout
@@ -118,19 +238,28 @@
                 android:id="@+id/et_prompt"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:backgroundTint="@color/accent"
                 android:hint="Ask Claude…"
                 android:imeOptions="actionSend"
                 android:inputType="textShortMessage"
                 android:maxLines="3"
-                android:textColor="@android:color/white"
-                android:textColorHint="@android:color/darker_gray" />
+                android:textColor="@color/ink"
+                android:textColorHint="@color/muted" />
 
             <Button
                 android:id="@+id/btn_send"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="16dp"
+                android:stateListAnimator="@null"
                 android:text="Send"
-                android:textSize="14sp" />
+                android:textAllCaps="false"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
 
         </LinearLayout>
 
@@ -147,7 +276,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="4dp"
-                android:textColor="@android:color/white"
+                android:textColor="@color/ink"
                 android:textSize="13sp" />
 
         </ScrollView>
