@@ -35,9 +35,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
+import kotlin.coroutines.resume
 
 class MainActivity : Activity() {
 
@@ -121,6 +124,8 @@ class MainActivity : Activity() {
     private val storeLock = Mutex()
     private var listenAfterPermission = false
     private var toolPermissionsAsked = false
+    // Whether the wearer has been told, this run, that the watch can't do Finnish.
+    private var toldAboutEnglish = false
 
     private lateinit var keySetup: KeySetupFlow
 
@@ -482,6 +487,19 @@ class MainActivity : Activity() {
                 showSetup(null)
                 return@launch
             }
+            // Whether this reply can be Finnish depends on the voice, which may still be checking
+            // its engines just after launch: wait for it (briefly) before choosing.
+            withTimeoutOrNull(VOICE_DECISION_MS) {
+                suspendCancellableCoroutine<Unit> { cont -> speaker.whenDecided { if (cont.isActive) cont.resume(Unit) } }
+            }
+            if (token != turnToken) return@launch
+            val finnish = Language.finnish
+            val note = if (!finnish && !toldAboutEnglish) {
+                toldAboutEnglish = true
+                ENGLISH_NOTE.format(if (!Language.finnishSpoken) "no Finnish voice is installed" else "its speech recogniser has no Finnish")
+            } else {
+                null
+            }
             val live = LiveReply(token, text)
             liveReply = live
             try {
@@ -489,7 +507,8 @@ class MainActivity : Activity() {
                     conversation.forRequest(),
                     key,
                     watchTools,
-                    finnish = Language.finnish,
+                    finnish = finnish,
+                    note = note,
                     onProgress = { label ->
                         scope.launch {
                             if (token != turnToken) return@launch
@@ -877,6 +896,10 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val AUTO_CLOSE_MS = 8_000L
+        const val VOICE_DECISION_MS = 4_000L
+        // Said by the English voice, so in English only.
+        const val ENGLISH_NOTE = "This watch can't do Finnish just now (%s). Begin your reply with one short " +
+            "sentence telling the wearer so and that you'll speak English, then answer in English."
         const val PARTIAL_CHARS = 70
         const val PREFS = "claudewatch"
     }

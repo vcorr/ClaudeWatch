@@ -60,20 +60,29 @@ class Speaker(context: Context) {
 
     // Engines to try, best first: Google's (installed beside Samsung's on Galaxy Watches), then
     // the watch's default (null). An engine with a Finnish voice wins; failing that, the first one
-    // that speaks English.
+    // that speaks English, which is kept running meanwhile rather than restarted.
     private val candidates: List<String?> = listOfNotNull(GOOGLE_TTS.takeIf { installed(it) }) + listOf<String?>(null)
-    private var englishOnly = -1
+    private var fallback: TextToSpeech? = null
+    private var fallbackEngine: String? = null
     private var englishVoice: Voice? = null
     private var finnishVoice: Voice? = null
     private var hasFinnish = false
     private var speakingFinnish: Boolean? = null
+    private val onDecided = mutableListOf<() -> Unit>()
 
     init {
         start(0)
     }
 
-    /** Starts candidate engine [index]; [settle] means take it whatever it can do. */
-    private fun start(index: Int, settle: Boolean = false) {
+    /**
+     * Runs [action] once the speaker knows whether it can speak Finnish (see [Language]), at once
+     * if it already does. The conversation's language should be read only after that.
+     */
+    fun whenDecided(action: () -> Unit) {
+        if (ready || failed) action() else onDecided += action
+    }
+
+    private fun start(index: Int) {
         val enginePackage = candidates[index]
         engine = enginePackage
         var created: TextToSpeech? = null
@@ -81,34 +90,36 @@ class Speaker(context: Context) {
             main.post {
                 if (tts !== created) return@post
                 val usable = status == TextToSpeech.SUCCESS && configure()
-                if (usable && (hasFinnish || settle)) {
+                if (usable && hasFinnish) {
+                    fallback?.shutdown()
+                    fallback = null
                     becomeReady()
                     return@post
                 }
-                if (usable && englishOnly < 0) englishOnly = index
+                if (usable && fallback == null) {
+                    fallback = created
+                    fallbackEngine = enginePackage
+                } else {
+                    created?.shutdown()
+                }
                 val next = index + 1
                 when {
-                    next < candidates.size -> {
-                        created?.shutdown()
-                        start(next)
-                    }
-                    // No engine has Finnish: settle for the best English one.
-                    englishOnly == index -> becomeReady()
-                    englishOnly >= 0 -> {
-                        created?.shutdown()
-                        start(englishOnly, settle = true)
-                    }
-                    else -> {
-                        failed = true
-                        description = "unavailable"
-                        Language.finnishSpoken = false
-                        waiting.clear()
-                        finishIfIdle()
-                    }
+                    next < candidates.size -> start(next)
+                    // No engine has Finnish: use the English one already running.
+                    fallback != null -> adoptFallback()
+                    else -> fail()
                 }
             }
         }, enginePackage)
         tts = created
+    }
+
+    private fun adoptFallback() {
+        tts = fallback
+        engine = fallbackEngine
+        fallback = null
+        configure()
+        becomeReady()
     }
 
     private fun becomeReady() {
@@ -118,16 +129,35 @@ class Speaker(context: Context) {
         waiting.clear()
         pending.forEach(::add)
         finishIfIdle()
+        decided()
+    }
+
+    private fun fail() {
+        failed = true
+        description = "unavailable"
+        Language.finnishSpoken = false
+        waiting.clear()
+        finishIfIdle()
+        decided()
+    }
+
+    private fun decided() {
+        val actions = onDecided.toList()
+        onDecided.clear()
+        actions.forEach { it() }
     }
 
     /** Sets the engine up and finds its voices; false if it can speak neither English nor Finnish. */
     private fun configure(): Boolean {
         val tts = tts ?: return false
         tts.setAudioAttributes(attributes)
-        englishVoice = bestVoice(tts, "en", locale.country)
-        finnishVoice = bestVoice(tts, "fi", "FI")
+        val voices = runCatching { tts.voices }.getOrNull().orEmpty()
+        englishVoice = bestVoice(voices, "en", locale.country)
+        finnishVoice = bestVoice(voices, "fi", "FI")
         val hasEnglish = englishVoice != null || available(tts, locale) || available(tts, Locale.ENGLISH)
-        hasFinnish = finnishVoice != null || available(tts, Language.FINNISH)
+        // An engine that lists its voices must list an installed Finnish one (a network-only voice
+        // fails offline); one that lists none, like Samsung's, is taken at its word.
+        hasFinnish = finnishVoice != null || (voices.isEmpty() && available(tts, Language.FINNISH))
         speakingFinnish = null
         tts.setSpeechRate(SPEECH_RATE)
         // The engine asked for; if it can't bind, the framework may quietly use another.
@@ -165,8 +195,8 @@ class Speaker(context: Context) {
     }
 
     /** An installed, offline voice in [language], preferring [country]; null if there is none. */
-    private fun bestVoice(tts: TextToSpeech, language: String, country: String): Voice? =
-        runCatching { tts.voices }.getOrNull().orEmpty()
+    private fun bestVoice(voices: Collection<Voice>, language: String, country: String): Voice? =
+        voices
             .filter { voice ->
                 voice.locale.language == language &&
                     TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in voice.features.orEmpty() &&
@@ -231,6 +261,8 @@ class Speaker(context: Context) {
         stop()
         tts?.shutdown()
         tts = null
+        fallback?.shutdown()
+        fallback = null
     }
 
     private fun finishIfLast(utteranceId: String?) {

@@ -175,7 +175,7 @@ class ProbeActivity : Activity() {
     private var trialRun = 0
 
     /**
-     * Listens five times in a row with the default recogniser, each time asking a little
+     * Listens six times in a row with the default recogniser, each time asking a little
      * differently, with a fresh recogniser each time. The wearer says the same short phrase in each
      * trial; whichever trials return words show how the app should ask.
      */

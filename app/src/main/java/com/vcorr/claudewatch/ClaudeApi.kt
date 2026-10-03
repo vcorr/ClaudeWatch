@@ -68,22 +68,24 @@ object ClaudeApi {
      * null once Claude is thinking again.
      * [onText] hears Claude's words as they stream in, on a background thread, so speaking can
      * start before the reply is complete; it hears every text block, including any said before a
-     * tool call ("Let me check"). [finnish] says the conversation is in Finnish (see [Language]).
+     * tool call ("Let me check"). [finnish] says the conversation is in Finnish (see [Language]);
+     * [note] is a one-off instruction for this reply, such as explaining a switch to English.
      */
     suspend fun reply(
         history: List<Turn>,
         apiKey: String,
         tools: WatchTools?,
         finnish: Boolean = false,
+        note: String? = null,
         onProgress: (String?) -> Unit = {},
         onText: (String) -> Unit = {},
     ): Reply = withContext(Dispatchers.IO) {
-        val system = "$SYSTEM_PROMPT ${if (finnish) IN_FINNISH else IN_ENGLISH} ${now()}"
+        val system = listOfNotNull(SYSTEM_PROMPT, if (finnish) IN_FINNISH else IN_ENGLISH, note, now()).joinToString(" ")
         try {
-            converse(history, apiKey, tools, system, withSearch = tools != null, onProgress, onText)
+            converse(history, apiKey, tools, system, finnish, withSearch = tools != null, onProgress, onText)
         } catch (e: SearchUnavailableException) {
             // If this account or model can't use web search, answer without it rather than fail.
-            converse(history, apiKey, tools, system, withSearch = false, onProgress, onText)
+            converse(history, apiKey, tools, system, finnish, withSearch = false, onProgress, onText)
         }
     }
 
@@ -92,6 +94,7 @@ object ClaudeApi {
         apiKey: String,
         tools: WatchTools?,
         system: String,
+        finnish: Boolean,
         withSearch: Boolean,
         onProgress: (String?) -> Unit,
         onText: (String) -> Unit,
@@ -153,10 +156,15 @@ object ClaudeApi {
                 }
                 // The server paused a long search; sending its turn back lets it carry on.
                 "pause_turn" -> messages.put(JSONObject().put("role", "assistant").put("content", content))
-                else -> return finish(json, used)
+                else -> return finish(json, used, finnish)
             }
         }
-        return Reply("Sorry, that took too many steps. Could you ask it more simply?", emptyList(), refused = true)
+        return Reply(
+            if (finnish) "Anteeksi, siihen meni liian monta vaihetta. Voisitko kysyä yksinkertaisemmin?"
+            else "Sorry, that took too many steps. Could you ask it more simply?",
+            emptyList(),
+            refused = true,
+        )
     }
 
     /**
@@ -280,9 +288,11 @@ object ClaudeApi {
         }
     }
 
-    private fun finish(json: JSONObject, used: Set<String>): Reply {
+    private fun finish(json: JSONObject, used: Set<String>, finnish: Boolean): Reply {
         val stopReason = json.optString("stop_reason")
-        if (stopReason == "refusal") return Reply("Sorry, I can't help with that one.", emptyList(), refused = true)
+        if (stopReason == "refusal") {
+            return Reply(if (finnish) "Anteeksi, en voi auttaa siinä." else "Sorry, I can't help with that one.", emptyList(), refused = true)
+        }
 
         // With search, the reply is the text after the last search result; earlier text is Claude
         // narrating the search ("I'll look that up"). A response may also begin with a non-text block.

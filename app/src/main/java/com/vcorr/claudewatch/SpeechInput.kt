@@ -100,6 +100,9 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
     // The languages to ask for, best first, and which one this attempt uses.
     private var languages: List<String?> = emptyList()
     private var languageIndex = 0
+    // This route refused Finnish; Finnish is turned off only once it listens in another language,
+    // since a later route might have Finnish.
+    private var refusedFinnish = false
 
     // The route that has listened this session, and whether this start has had its one retry.
     private var provenRoute = -1
@@ -117,6 +120,7 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
         retried = false
         languages = listOf(Language.recognitionTag(), SpeechInput.englishTag(), null).distinct()
         languageIndex = 0
+        refusedFinnish = false
         if (routes.isEmpty()) {
             active = null
             listener.onError("No speech service works in-app", routeUnavailable = true)
@@ -158,6 +162,7 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
                 main.removeCallbacks(timeout)
                 if (!current()) return
                 provenRoute = routeIndex
+                if (refusedFinnish && asked != Language.FINNISH_TAG) Language.finnishHeard = false
                 report("${route.label} ($language): listening")
                 listener.onListening()
             }
@@ -187,17 +192,18 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
             override fun onError(error: Int) {
                 if (!current()) return
                 main.removeCallbacks(timeout)
+                val languageProblem = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                // Some services only say so after they have started listening.
+                if (languageProblem && languageIndex < languages.lastIndex) {
+                    // Same route again in the next language.
+                    report("${route.label} ($language): ${SpeechInput.errorName(error)}")
+                    if (asked == Language.FINNISH_TAG) refusedFinnish = true
+                    languageIndex++
+                    startWith(listener)
+                    return
+                }
                 if (!ready && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && error != SpeechRecognizer.ERROR_NO_MATCH) {
-                    val languageProblem = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-                    if (languageProblem && languageIndex < languages.lastIndex) {
-                        // Same route again in the next language: no Finnish means English from now on.
-                        report("${route.label} ($language): ${SpeechInput.errorName(error)}")
-                        if (asked == Language.FINNISH_TAG) Language.finnishHeard = false
-                        languageIndex++
-                        startWith(listener)
-                        return
-                    }
                     val transient = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
                         error == SpeechRecognizer.ERROR_CLIENT ||
                         error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED
@@ -254,9 +260,10 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
             return
         }
         Log.d(TAG, "speech route ${route.label} unusable: $reason")
-        // The next route starts from the top, without Finnish if this one turned it off.
+        // The next route starts from the top, Finnish first unless it has been turned off.
         languages = listOf(Language.recognitionTag(), SpeechInput.englishTag(), null).distinct()
         languageIndex = 0
+        refusedFinnish = false
         routeIndex++
         if (routeIndex < routes.size) {
             startWith(listener)
