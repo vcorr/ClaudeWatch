@@ -16,7 +16,7 @@
 
     <View
         android:id="@+id/glow"
-        android:layout_width="300dp"
+        android:layout_width="210dp"
         android:layout_height="210dp"
         android:layout_gravity="bottom|center_horizontal" />
 
@@ -126,14 +126,16 @@
             android:layout_marginTop="4dp"
             android:layout_weight="1"
             android:fadingEdgeLength="28dp"
+            android:fillViewport="true"
             android:requiresFadingEdge="vertical"
             android:scrollbars="none">
 
+            <!-- Fills the scroll area, so a tap anywhere on it (even below a short reply) stops it. -->
             <TextView
                 android:id="@+id/tv_reply"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center"
+                android:gravity="center_horizontal"
                 android:lineSpacingMultiplier="1.15"
                 android:paddingVertical="6dp"
                 android:textColor="@color/ink"
@@ -156,8 +158,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text="Tap anywhere to stop"
-            android:textColor="@color/muted"
-            android:textSize="9sp" />
+            android:textColor="@color/soft"
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/btn_cancel"

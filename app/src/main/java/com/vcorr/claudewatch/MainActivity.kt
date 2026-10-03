@@ -28,7 +28,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -182,7 +181,12 @@ class MainActivity : Activity() {
             gradientType = GradientDrawable.RADIAL_GRADIENT
             gradientRadius = 105f * density
             setGradientCenter(0.5f, 0.5f)
-            colors = intArrayOf((0x8C shl 24) or (accent and 0xFFFFFF), accent and 0xFFFFFF)
+            // Several stops, so it fades softly with no visible rim.
+            val rgb = accent and 0xFFFFFF
+            setColors(
+                intArrayOf((0x8C shl 24) or rgb, (0x47 shl 24) or rgb, (0x14 shl 24) or rgb, rgb),
+                floatArrayOf(0f, 0.35f, 0.7f, 1f),
+            )
         }
         // While listening the glow breathes, to show the microphone is open.
         glowPulse = ObjectAnimator.ofPropertyValuesHolder(
@@ -210,6 +214,17 @@ class MainActivity : Activity() {
         }
         layoutVoice.setOnClickListener(stopAnywhere)
         tvReply.setOnClickListener(stopAnywhere)
+        // A tap while listening sends what was heard; a long press drops it instead.
+        layoutVoice.setOnLongClickListener {
+            val listening = state == State.LISTENING
+            if (listening) interrupt(null)
+            listening
+        }
+        // A soft shadow keeps text legible over a bright watch face.
+        val shadow = 4f * density
+        listOf(tvStatus, tvLead, tvMain, tvTitle, tvCaption, tvReply, tvHint).forEach {
+            it.setShadowLayer(shadow, 0f, 0f, 0xCC000000.toInt())
+        }
         // The voice diagnostics hide behind a long press on either microphone button.
         val openProbe = View.OnLongClickListener {
             interrupt(null)
@@ -747,6 +762,9 @@ class MainActivity : Activity() {
             State.LISTENING -> "Listening"
             else -> toolLabel ?: "Thinking"
         }
+        // The accent is hard to read against a bright watch face next to the glow; listening is
+        // the face most often seen at a glance, so its label is light.
+        tvStatus.setTextColor(getColor(if (state == State.LISTENING) R.color.soft else R.color.accent))
 
         tvLead.show(state == State.SPEAKING || state == State.FOLLOW_UP || readingReply)
         if (state == State.FOLLOW_UP && reply != null) {
@@ -789,7 +807,14 @@ class MainActivity : Activity() {
 
         scrollReply.show(state == State.SPEAKING || readingReply)
         ivClawdSmall.show(state == State.SPEAKING)
-        tvHint.show(state == State.SPEAKING)
+        tvHint.show(state == State.SPEAKING || state == State.LISTENING)
+        tvHint.text = if (state == State.LISTENING) "Tap to send, hold to cancel" else "Tap anywhere to stop"
+        layoutVoice.contentDescription = when (state) {
+            State.LISTENING -> "Listening. Double-tap to send."
+            State.SPEAKING -> "Claude is speaking. Double-tap to stop."
+            State.FOLLOW_UP -> "Listening for a follow-up. Double-tap to stop."
+            else -> null
+        }
         btnCancel.show(state == State.THINKING)
         rowActions.show(state == State.IDLE)
         btnTalkSmall.show(readingReply)
@@ -808,14 +833,14 @@ class MainActivity : Activity() {
      */
     private fun renderOverlay(reading: Boolean) {
         val veil = when (state) {
-            State.LISTENING -> 0.62f
-            State.THINKING -> 0.68f
+            State.LISTENING -> 0.72f
+            State.THINKING -> 0.74f
             State.FOLLOW_UP -> 0.75f
             State.SPEAKING -> 0.85f
             State.IDLE -> if (reading) 0.85f else 0.75f
             State.TYPING, State.SETUP -> 0.94f
         }
-        scrim.alpha = veil
+        scrim.animate().alpha(veil).setDuration(OVERLAY_FADE_MS).start()
         // How far the glow's box sits below the screen's bottom edge: higher while listening.
         val sink = when (state) {
             State.LISTENING -> 110
@@ -824,13 +849,7 @@ class MainActivity : Activity() {
             else -> 160
         }
         glow.show(state != State.TYPING && state != State.SETUP)
-        (glow.layoutParams as FrameLayout.LayoutParams).let {
-            val margin = -(sink * resources.displayMetrics.density).toInt()
-            if (it.bottomMargin != margin) {
-                it.bottomMargin = margin
-                glow.layoutParams = it
-            }
-        }
+        glow.animate().translationY(sink * resources.displayMetrics.density).setDuration(OVERLAY_FADE_MS).start()
         val bottom = state == State.LISTENING || state == State.THINKING
         layoutVoice.gravity = if (bottom) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
         layoutVoice.setPadding(
@@ -977,6 +996,7 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val AUTO_CLOSE_MS = 8_000L
+        const val OVERLAY_FADE_MS = 250L
         const val PARTIAL_CHARS = 70
         const val PREFS = "claudewatch"
     }
