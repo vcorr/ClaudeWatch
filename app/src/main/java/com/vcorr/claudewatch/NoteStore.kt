@@ -39,16 +39,22 @@ class NoteStore(context: Context) {
         note.takeIf { write(Contents(contents.nextId + 1, (contents.notes + note).takeLast(MAX_NOTES))) }
     }
 
-    /** Removes the notes with these ids; returns how many went. */
+    /** Removes the notes with these ids; returns how many went, or -1 if the notes couldn't be changed. */
     fun remove(ids: Set<Int>): Int = synchronized(LOCK) {
-        val contents = runCatching { read() }.getOrNull() ?: return 0
+        val contents = runCatching { read() }.getOrNull() ?: return -1
         val kept = contents.notes.filterNot { it.id in ids }
-        if (write(Contents(contents.nextId, kept))) contents.notes.size - kept.size else 0
+        if (write(Contents(contents.nextId, kept))) contents.notes.size - kept.size else -1
     }
 
+    /**
+     * Deletes every note; returns how many there were (0 if the file couldn't be read), or -1 if
+     * nothing could be written. An unreadable file is replaced too, so this always recovers, with
+     * ids starting past any the old file might have used.
+     */
     fun clear(): Int = synchronized(LOCK) {
-        val contents = runCatching { read() }.getOrNull() ?: return 0
-        if (write(Contents(contents.nextId, emptyList()))) contents.notes.size else 0
+        val contents = runCatching { read() }.getOrNull()
+        val nextId = contents?.nextId ?: maxOf(1, (System.currentTimeMillis() / 1000 % 1_000_000_000).toInt())
+        if (write(Contents(nextId, emptyList()))) contents?.notes?.size ?: 0 else -1
     }
 
     // A missing file is simply no notes yet; any other failure throws, so nothing overwrites a
@@ -59,7 +65,8 @@ class NoteStore(context: Context) {
         } catch (e: FileNotFoundException) {
             return Contents(1, emptyList())
         }
-        val root = JSONObject(text)
+        // The first version kept a bare list, with no counter.
+        val root = if (text.trimStart().startsWith("[")) JSONObject().put("notes", JSONArray(text)) else JSONObject(text)
         val array = root.getJSONArray("notes")
         val notes = (0 until array.length()).map { i ->
             val o = array.getJSONObject(i)

@@ -384,7 +384,10 @@ class Speaker(context: Context) {
         restoreVolume = null
         raisedTo = null
         runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0) }
-        return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val set = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        // Mid-reply, the rest of it must still be heard: lift a quiet choice again, to be restored after.
+        if (audioHeld) raiseQuietVolume()
+        return set
     }
 
     /** Puts the volume back, unless the wearer changed it meanwhile; their choice then stands. */

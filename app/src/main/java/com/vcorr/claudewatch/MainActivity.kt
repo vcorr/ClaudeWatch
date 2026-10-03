@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.TypedValue
@@ -117,6 +118,8 @@ class MainActivity : Activity() {
     // the Home key, say) listens again, as a fresh launch does. Not set for our own screens.
     private var listenOnReturn = false
     private var leavingForOwnScreen = false
+    // Until then, a stop is another app's screen a tool opened (the Clock's), not the wearer leaving.
+    private var leavingForOtherAppUntil = 0L
     // Set for a listen the wearer didn't ask for in so many words (a launch or a return), so
     // silence then closes the app instead of leaving it open.
     private var closeIfSilent = false
@@ -164,13 +167,7 @@ class MainActivity : Activity() {
             speaker = this@MainActivity.speaker
             // The Clock app may show its screen for a timer; coming back from it mustn't start
             // listening. If it shows nothing, the flag lapses rather than catching a later exit.
-            beforeLeaving = {
-                leavingForOwnScreen = true
-                scope.launch {
-                    delay(LEAVING_LAPSE_MS)
-                    if (foreground) leavingForOwnScreen = false
-                }
-            }
+            beforeLeaving = { leavingForOtherAppUntil = SystemClock.uptimeMillis() + LEAVING_LAPSE_MS }
         }
         StepsService.register(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
@@ -313,8 +310,10 @@ class MainActivity : Activity() {
         // The screen going off (timeout, wrist down) also stops the app on Wear OS; waking it to reread
         // a reply must not open the microphone, so only a stop with the screen on counts as leaving.
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
-        listenOnReturn = screenOn && !leavingForOwnScreen && !listenAfterPermission
+        val forOtherApp = SystemClock.uptimeMillis() < leavingForOtherAppUntil
+        listenOnReturn = screenOn && !leavingForOwnScreen && !forOtherApp && !listenAfterPermission
         leavingForOwnScreen = false
+        leavingForOtherAppUntil = 0L
         // The microphone may only be used while the app is visible; a reply may finish speaking.
         if (state == State.LISTENING || state == State.FOLLOW_UP) interrupt(null)
     }
@@ -909,7 +908,8 @@ class MainActivity : Activity() {
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
         const val AUTO_CLOSE_MS = 8_000L
-        const val LEAVING_LAPSE_MS = 3_000L
+        // A cold start of the Clock app on a watch can take several seconds.
+        const val LEAVING_LAPSE_MS = 8_000L
         const val VOICE_DECISION_MS = 4_000L
         // Said by the English voice, so in English only.
         const val ENGLISH_NOTE = "This watch can't do Finnish just now (%s). Begin your reply with one short " +

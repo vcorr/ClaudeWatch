@@ -686,7 +686,7 @@ class WatchTools(private val context: Context) {
         }
         // The rotation vector's own estimate of its heading error, where the watch gives one, is
         // more telling than the accuracy status, which many watches leave fixed.
-        val errorDegrees = values.getOrNull(4)?.takeIf { sensor.type == Sensor.TYPE_ROTATION_VECTOR && it >= 0 }
+        val errorDegrees = values.getOrNull(4)?.takeIf { sensor.type == Sensor.TYPE_ROTATION_VECTOR && it > 0f }
             ?.let { Math.toDegrees(it.toDouble()).roundToInt() }
         val unsure = errorDegrees?.let { it > COMPASS_MAX_ERROR_DEGREES } ?: (status.get() < SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM)
         val calibration = if (unsure) {
@@ -766,10 +766,15 @@ class WatchTools(private val context: Context) {
     }
 
     private suspend fun forget(ids: JSONArray?, all: Boolean): String = withContext(Dispatchers.IO) {
-        if (all) return@withContext "Deleted all ${notes.clear()} notes."
+        if (all) {
+            val count = notes.clear()
+            if (count < 0) throw ToolException("The notes on the watch couldn't be changed.")
+            return@withContext "Deleted all $count notes."
+        }
         val wanted = (0 until (ids?.length() ?: 0)).mapNotNull { ids?.optInt(it, -1)?.takeIf { id -> id > 0 } }.toSet()
         if (wanted.isEmpty()) throw ToolException("Say which notes to delete, by the ids recall gives.")
         val removed = notes.remove(wanted)
+        if (removed < 0) throw ToolException("The notes on the watch couldn't be changed.")
         if (removed == 0) "No note had those ids." else "Deleted $removed note${if (removed == 1) "" else "s"}."
     }
 

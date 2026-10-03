@@ -115,6 +115,7 @@ class ProbeActivity : Activity() {
 
         log("— Notifications —")
         log(notificationAccessLine())
+        scope.launch { NotificationsService.describeSources(this@ProbeActivity)?.let { log("Notification sources: $it") } }
 
         log("— Claude round trip —")
         scope.launch {
