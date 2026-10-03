@@ -75,7 +75,6 @@ object SpokenText {
                     current.append(text[i])
                 }
                 val spaceFollows = i + 1 < text.length && text[i + 1].isWhitespace()
-                // "1." at the start of a list item numbers it; it doesn't end a sentence.
                 // "1." alone at the start of a line numbers a list item; it doesn't end a sentence.
                 // Elsewhere, as in "The answer is 4. Anything else?", it does.
                 val line = text.substring(text.lastIndexOf('\n', i) + 1, i + 1).trim()
@@ -89,6 +88,10 @@ object SpokenText {
         }
         return end
     }
+
+    /** Claude's text as the sentences to speak: [clean]ed, then split by [sentences]. */
+    fun spokenSentences(text: String, atLineStart: Boolean = true): List<String> =
+        sentences(clean(text, atLineStart))
 
     /** For a reply cut off by the token limit: everything up to the last complete sentence. */
     fun upToLastSentence(text: String): String {

@@ -17,7 +17,7 @@ import java.io.File
  */
 object ConversationStore {
 
-    const val MAX_AGE_MS = 30 * 60 * 1000L
+    private const val MAX_AGE_MS = 30 * 60 * 1000L
 
     private fun file(context: Context) = AtomicFile(File(context.filesDir, "conversation.json"))
 
@@ -27,18 +27,7 @@ object ConversationStore {
             .put("turns", JSONArray().apply {
                 turns.forEach { put(JSONObject().put("role", it.role.name).put("text", it.text)) }
             })
-        val target = file(context)
-        val out = try {
-            target.startWrite()
-        } catch (e: Exception) {
-            return@withContext
-        }
-        try {
-            out.write(json.toString().toByteArray())
-            target.finishWrite(out)
-        } catch (e: Exception) {
-            target.failWrite(out)
-        }
+        file(context).writeAll(json.toString().toByteArray())
     }
 
     /** The saved turns, or none if there are none or they are too old. */

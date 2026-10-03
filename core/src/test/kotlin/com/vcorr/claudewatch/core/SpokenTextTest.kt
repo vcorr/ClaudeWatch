@@ -86,4 +86,37 @@ class SpokenTextTest {
         assertEquals("42. That is the answer.", SpokenText.clean(" 42. That is the answer.", atLineStart = false))
         assertEquals("That is the answer.", SpokenText.clean("42. That is the answer."))
     }
+
+    @Test
+    fun cleanDropsCodeFencesAndOtherListMarkers() {
+        assertEquals("Run it. Then stop.", SpokenText.clean("```kotlin\nRun it\n```\n• Then stop"))
+        assertEquals("First. Second.", SpokenText.clean("1) First\n2) Second"))
+    }
+
+    @Test
+    fun cleanKeepsAHeadingMarkerMidLine() {
+        assertEquals("# not a heading.", SpokenText.clean("# not a heading", atLineStart = false))
+    }
+
+    @Test
+    fun sentencesKeepInitialsAndQuotedEndings() {
+        assertEquals(listOf("J. Smith said \"go!\"", "Then he left"), SpokenText.sentences("J. Smith said \"go!\" Then he left"))
+    }
+
+    @Test
+    fun upToLastSentenceLeavesASingleUnfinishedSentence() {
+        assertEquals("It was a dark and", SpokenText.upToLastSentence("It was a dark and"))
+        assertEquals("He said \"hi.\"", SpokenText.upToLastSentence("He said \"hi.\""))
+    }
+
+    @Test
+    fun completeLengthHandlesDecimalsAndLongListNumbers() {
+        assertEquals("It costs 3.5 pounds.".length, SpokenText.completeLength("It costs 3.5 pounds. And"))
+        assertEquals("Items:\n10. Last one.".length, SpokenText.completeLength("Items:\n10. Last one. More"))
+    }
+
+    @Test
+    fun spokenSentencesCleansThenSplits() {
+        assertEquals(listOf("Tea is calming.", "Coffee wakes you."), SpokenText.spokenSentences("- **Tea** is calming\n- Coffee wakes you"))
+    }
 }

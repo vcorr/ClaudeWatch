@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ClaudeWatch</string>
+    <string name="talk_to_claude">Talk to Claude</string>
     <string name="tile_description">Talk to Claude: one tap starts listening.</string>
 </resources>

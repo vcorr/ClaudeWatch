@@ -71,14 +71,14 @@ class TalkTileService : TileService() {
                     .setClickable(talk)
                     .setBackground(
                         ModifiersBuilders.Background.Builder()
-                            .setColor(argb(ACCENT))
+                            .setColor(argb(getColor(R.color.accent)))
                             .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(BUTTON_SIZE / 2)).build())
                             .build()
                     )
-                    .setSemantics(ModifiersBuilders.Semantics.Builder().setContentDescription("Talk to Claude").build())
+                    .setSemantics(ModifiersBuilders.Semantics.Builder().setContentDescription(getString(R.string.talk_to_claude)).build())
                     .build()
             )
-            .addContent(text("Talk", INK_ON_ACCENT, 16f))
+            .addContent(text("Talk", getColor(R.color.ink_on_accent), 16f))
             .build()
 
         val column = LayoutElementBuilders.Column.Builder()
@@ -93,7 +93,7 @@ class TalkTileService : TileService() {
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(10f)).build())
             .addContent(button)
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(8f)).build())
-            .addContent(text("ClaudeWatch", MUTED, 12f))
+            .addContent(text(getString(R.string.app_name), getColor(R.color.muted), 12f))
             .build()
 
         return LayoutElementBuilders.Box.Builder()
@@ -124,9 +124,5 @@ class TalkTileService : TileService() {
         const val RESOURCES_VERSION = "1"
         const val CLAWD = "clawd"
         const val BUTTON_SIZE = 64f
-        // The design's colours: accent, the dark ink on it, and the muted grey.
-        const val ACCENT = 0xFFD97757.toInt()
-        const val INK_ON_ACCENT = 0xFF141413.toInt()
-        const val MUTED = 0xFFA3A29C.toInt()
     }
 }

@@ -2,24 +2,15 @@ package com.vcorr.claudewatch
 
 import android.Manifest
 import android.animation.ObjectAnimator
-import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
@@ -47,7 +38,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
-import java.net.Inet4Address
 
 class MainActivity : Activity() {
 
@@ -98,7 +88,7 @@ class MainActivity : Activity() {
     private var followUpTimed = false
 
     private lateinit var clawdBob: ObjectAnimator
-    private lateinit var glowPulse: ObjectAnimator
+    private lateinit var overlay: Overlay
     private var followUpCountdown: ValueAnimator? = null
 
     // Bumped by every new turn or interruption; callbacks from older turns are ignored.
@@ -111,6 +101,8 @@ class MainActivity : Activity() {
     private lateinit var dialogInput: DialogSpeechInput
     // Set when no in-app speech service works; for this session only, so the next launch tries again.
     private var useDialog = false
+    // Which speech routes exist doesn't change while the app runs, so look once.
+    private val inAppAvailable by lazy { InAppSpeechInput.isAvailable(this) }
     private var requestJob: Job? = null
     private var followUpJob: Job? = null
     private var closeJob: Job? = null
@@ -130,11 +122,7 @@ class MainActivity : Activity() {
     private var listenAfterPermission = false
     private var toolPermissionsAsked = false
 
-    private var setupServer: KeySetupServer? = null
-    private var setupPort = 0
-    private var setupAddress: String? = null
-    private var setupNotice: String? = null
-    private var wifiCallback: ConnectivityManager.NetworkCallback? = null
+    private lateinit var keySetup: KeySetupFlow
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -175,35 +163,17 @@ class MainActivity : Activity() {
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
         }
-        // The glow: the accent fading out from a point just below the screen's bottom edge.
-        val accent = getColor(R.color.accent)
-        glow.background = GradientDrawable().apply {
-            gradientType = GradientDrawable.RADIAL_GRADIENT
-            gradientRadius = 105f * density
-            setGradientCenter(0.5f, 0.5f)
-            // Several stops, so it fades softly with no visible rim.
-            val rgb = accent and 0xFFFFFF
-            setColors(
-                intArrayOf((0x8C shl 24) or rgb, (0x47 shl 24) or rgb, (0x14 shl 24) or rgb, rgb),
-                floatArrayOf(0f, 0.35f, 0.7f, 1f),
-            )
-        }
-        // While listening the glow breathes, to show the microphone is open.
-        glowPulse = ObjectAnimator.ofPropertyValuesHolder(
-            glow,
-            PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.12f),
-            PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.12f),
-            PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.7f),
-        ).apply {
-            duration = 900
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
+        overlay = Overlay(scrim, glow, layoutVoice, getColor(R.color.accent))
+        keySetup = KeySetupFlow(this, tvSetup) {
+            goIdle("Key saved")
+            Toast.makeText(this, "Key saved", Toast.LENGTH_SHORT).show()
         }
 
         btnTalk.setOnClickListener { onTalkTapped() }
         btnTalkSmall.setOnClickListener { onTalkTapped() }
         btnCancel.setOnClickListener { interrupt(null) }
-        // While Claude talks, or waits for a follow-up, a tap anywhere stops it, not just the button.
+        // A tap anywhere: stops Claude talking or the follow-up window, sends what was heard while
+        // listening, and silences a spoken error.
         val stopAnywhere = View.OnClickListener {
             when (state) {
                 State.SPEAKING, State.FOLLOW_UP -> interrupt(null)
@@ -299,7 +269,7 @@ class MainActivity : Activity() {
         scope.launch {
             // Also restarts setup after a pause, e.g. when it was opened because the key was rejected.
             if (state == State.SETUP || ApiKeyStore.read(this@MainActivity) == null) {
-                showSetup(setupNotice)
+                showSetup(keySetup.notice)
             } else if (listenOnLaunch) {
                 listenOnLaunch = false
                 startListening(followUp = false, unprompted = true)
@@ -311,7 +281,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        stopSetup()
+        keySetup.stop()
     }
 
     override fun onStop() {
@@ -333,7 +303,10 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopSetup()
+        keySetup.stop()
+        clawdBob.cancel()
+        overlay.release()
+        followUpCountdown?.cancel()
         inAppInput?.destroy()
         dialogInput.destroy()
         speaker.shutdown()
@@ -357,7 +330,7 @@ class MainActivity : Activity() {
         }.apply()
         // The step feed can only start once its permission is granted.
         StepsService.register(this)
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
             startListening(followUp = false)
         } else {
             goIdle("Microphone permission is needed to talk", problem = true, spoken = "I need the microphone permission to hear you.")
@@ -376,7 +349,7 @@ class MainActivity : Activity() {
     }
 
     private fun toolPermissionsToAsk(): Array<String> = WatchTools.permissions()
-        .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED && !alreadyAsked(it) }
+        .filter { !hasPermission(it) && !alreadyAsked(it) }
         .toTypedArray()
 
     // Each permission is asked for once; if refused, the tool tells Claude how the wearer can allow it.
@@ -384,26 +357,28 @@ class MainActivity : Activity() {
         getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("asked:$permission", false)
 
     private fun currentInput(): SpeechInput =
-        if (!useDialog && InAppSpeechInput.isAvailable(this)) {
+        if (!useDialog && inAppAvailable) {
             inAppInput ?: InAppSpeechInput(this).also { inAppInput = it }
         } else {
             dialogInput
         }
 
     private fun startListening(followUp: Boolean, unprompted: Boolean = false) {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
             listenAfterPermission = true
             leavingForOwnScreen = true
             // The watch tools' permissions are asked for at the same time, once.
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO) + toolPermissionsToAsk(), REQ_MIC)
             return
         }
-        if (!toolPermissionsAsked && toolPermissionsToAsk().isNotEmpty()) {
-            // Installed before the watch tools existed: ask for theirs once, then listen.
+        val toolPermissions = if (toolPermissionsAsked) emptyArray() else toolPermissionsToAsk()
+        if (toolPermissions.isNotEmpty()) {
+            // The microphone is already allowed (an earlier version, or the diagnostics asked for
+            // it) but some watch tools' permissions haven't been asked for: ask once, then listen.
             toolPermissionsAsked = true
             listenAfterPermission = true
             leavingForOwnScreen = true
-            requestPermissions(toolPermissionsToAsk(), REQ_MIC)
+            requestPermissions(toolPermissions, REQ_MIC)
             return
         }
         cancelClose()
@@ -414,11 +389,11 @@ class MainActivity : Activity() {
         val input = currentInput()
         state = if (followUp) State.FOLLOW_UP else State.LISTENING
         tvMain.text = ""
-        // In-app follow-ups close after 3.5 s of silence; the system dialog has its own timeout.
+        // In-app follow-ups close after FOLLOW_UP_WINDOW_MS of silence; the system dialog has its own timeout.
         followUpTimed = followUp && input !== dialogInput
         keepScreenOn(true)
         render()
-        tick()
+        buzz(VibrationEffect.EFFECT_TICK)
 
         var heardSpeech = false
         input.start(object : SpeechInput.Listener {
@@ -517,7 +492,7 @@ class MainActivity : Activity() {
                     onProgress = { label ->
                         scope.launch {
                             if (token != turnToken) return@launch
-                            toolLabel = label.takeIf { it != "Thinking" }
+                            toolLabel = label
                             render()
                         }
                     },
@@ -636,7 +611,7 @@ class MainActivity : Activity() {
 
         // A chunk after the first starts mid-line, so a number at its start is not a list marker.
         private fun say(chunk: String, atLineStart: Boolean) {
-            val sentences = SpokenText.sentences(SpokenText.clean(chunk, atLineStart))
+            val sentences = SpokenText.spokenSentences(chunk, atLineStart)
             if (sentences.isEmpty()) return
             if (!started) begin()
             sentences.forEach(speaker::add)
@@ -769,7 +744,7 @@ class MainActivity : Activity() {
         tvLead.show(state == State.SPEAKING || state == State.FOLLOW_UP || readingReply)
         if (state == State.FOLLOW_UP && reply != null) {
             tvLead.maxLines = 2
-            tvLead.text = SpokenText.sentences(SpokenText.clean(reply)).lastOrNull()?.let { "…$it" }.orEmpty()
+            tvLead.text = SpokenText.spokenSentences(reply).lastOrNull()?.let { "…$it" }.orEmpty()
         } else {
             tvLead.maxLines = 1
             tvLead.text = shownQuestion
@@ -795,10 +770,9 @@ class MainActivity : Activity() {
         btnTalk.setBackgroundResource(if (problem) R.drawable.bg_mic_outline else R.drawable.bg_mic_filled)
         btnTalk.imageTintList = getColorStateList(if (problem) R.color.accent else R.color.ink_on_accent)
         btnTalk.contentDescription = when {
-            state == State.LISTENING -> "Stop listening and send"
             state == State.FOLLOW_UP -> "Stop listening"
             problem -> "Try again"
-            else -> "Talk to Claude"
+            else -> getString(R.string.talk_to_claude)
         }
 
         tvTitle.show(state == State.IDLE && !readingReply || state == State.FOLLOW_UP)
@@ -820,7 +794,6 @@ class MainActivity : Activity() {
         btnTalkSmall.show(readingReply)
 
         clawdBob.runWhile(state == State.THINKING)
-        glowPulse.runWhile(state == State.LISTENING)
         renderOverlay(readingReply || problem)
         if (state != State.FOLLOW_UP) followUpCountdown?.cancel()
         // Lets the watch's bezel or crown scroll the reply.
@@ -840,23 +813,18 @@ class MainActivity : Activity() {
             State.IDLE -> if (reading) 0.85f else 0.75f
             State.TYPING, State.SETUP -> 0.94f
         }
-        scrim.animate().alpha(veil).setDuration(OVERLAY_FADE_MS).start()
-        // How far the glow's box sits below the screen's bottom edge: higher while listening.
-        val sink = when (state) {
+        val glowSink = when (state) {
             State.LISTENING -> 110
             State.THINKING -> 125
             State.SPEAKING, State.FOLLOW_UP -> 150
             else -> 160
         }
-        glow.show(state != State.TYPING && state != State.SETUP)
-        glow.animate().translationY(sink * resources.displayMetrics.density).setDuration(OVERLAY_FADE_MS).start()
-        val bottom = state == State.LISTENING || state == State.THINKING
-        layoutVoice.gravity = if (bottom) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
-        layoutVoice.setPadding(
-            layoutVoice.paddingLeft,
-            layoutVoice.paddingTop,
-            layoutVoice.paddingRight,
-            ((if (bottom) 46 else 18) * resources.displayMetrics.density).toInt(),
+        overlay.show(
+            veilAlpha = veil,
+            glowVisible = state != State.TYPING && state != State.SETUP,
+            glowSinkDp = glowSink,
+            contentAtBottom = state == State.LISTENING || state == State.THINKING,
+            breathe = state == State.LISTENING,
         )
     }
 
@@ -875,16 +843,6 @@ class MainActivity : Activity() {
         visibility = if (visible) View.VISIBLE else View.GONE
     }
 
-    private fun ObjectAnimator.runWhile(running: Boolean) {
-        if (running) {
-            if (!isStarted) start()
-        } else if (isStarted) {
-            // Back to where it started, touching only what it animates.
-            cancel()
-            setCurrentFraction(0f)
-        }
-    }
-
     private fun keepScreenOn(on: Boolean) {
         if (on) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -895,8 +853,6 @@ class MainActivity : Activity() {
 
     // Haptics tell the wearer where things stand without looking: a tick when listening starts, a
     // click when their words are in, a double click as the answer begins, a heavy click for a problem.
-    private fun tick() = buzz(VibrationEffect.EFFECT_TICK)
-
     private fun buzz(effect: Int) {
         getSystemService(Vibrator::class.java)
             ?.takeIf { it.hasVibrator() }
@@ -911,83 +867,7 @@ class MainActivity : Activity() {
         state = State.SETUP
         render()
         keepScreenOn(true)
-        if (setupServer != null) return
-
-        val server = KeySetupServer(
-            this,
-            onKeySaved = {
-                runOnUiThread {
-                    setupNotice = null
-                    stopSetup()
-                    goIdle("Key saved")
-                    Toast.makeText(this, "Key saved", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onLockedOut = {
-                runOnUiThread {
-                    stopSetup()
-                    tvSetup.text = "Too many wrong PINs.\n\nClose and reopen ClaudeWatch for a new PIN."
-                }
-            },
-        )
-        setupPort = try {
-            server.start()
-        } catch (e: IOException) {
-            tvSetup.text = "Couldn't start key setup: ${e.message}"
-            return
-        }
-        setupServer = server
-        setupNotice = notice
-        requestWifi()
-        renderSetup()
-    }
-
-    private fun renderSetup() {
-        val server = setupServer ?: return
-        val notice = setupNotice?.let { "$it\n\n" }.orEmpty()
-        val ip = setupAddress
-        tvSetup.text = if (ip == null) {
-            "${notice}Set your API key\n\nWaiting for Wi-Fi…\nTurn on the watch's Wi-Fi, on the same network as your phone."
-        } else {
-            "${notice}Set your API key\n\nOn your phone, open\nhttp://$ip:$setupPort\n\nPIN  ${server.pin}\n\nPhone and watch on the same Wi-Fi."
-        }
-    }
-
-    /** Wear OS may keep Wi-Fi off while Bluetooth is connected; asking for it brings it up. */
-    private fun requestWifi() {
-        val cm = getSystemService(ConnectivityManager::class.java)
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-                val ip = linkProperties.linkAddresses
-                    .map { it.address }
-                    .firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
-                    ?.hostAddress
-                runOnUiThread {
-                    setupAddress = ip
-                    renderSetup()
-                }
-            }
-
-            override fun onLost(network: Network) {
-                runOnUiThread {
-                    setupAddress = null
-                    renderSetup()
-                }
-            }
-        }
-        val request = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .build()
-        cm.requestNetwork(request, callback)
-        wifiCallback = callback
-    }
-
-    private fun stopSetup() {
-        setupServer?.stop()
-        setupServer = null
-        setupAddress = null
-        wifiCallback?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
-        wifiCallback = null
+        keySetup.start(notice)
     }
 
     private companion object {

@@ -41,9 +41,10 @@ interface SpeechInput {
     fun destroy()
 
     companion object {
-        fun recognizeIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        /** A free-form recognition request, in [language] (none: the watch's own language). */
+        fun recognizeIntent(language: String? = englishTag()): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, englishTag())
+            .apply { if (language != null) putExtra(RecognizerIntent.EXTRA_LANGUAGE, language) }
 
         /** The watch's own English (en-GB on the owner's watch), or US English if it isn't set to English. */
         fun englishTag(): String =
@@ -74,9 +75,9 @@ interface SpeechInput {
  *
  * A watch can have several speech routes: the default service, an on-device recogniser (API 31+),
  * and each installed service (a Galaxy Watch has Google's and Samsung's). The default may refuse
- * other apps, and a service may lack an en-US model. So this tries each route in turn, first asking
- * for en-US and then, if the language is the problem, the watch's own language, and sticks with the
- * first that gets as far as listening. [log], when set, hears about every attempt.
+ * other apps, and a service may lack a model for the language asked. So this tries each route in
+ * turn, first asking for the watch's English ([SpeechInput.englishTag]) and then, if the language is
+ * the problem, for no language at all, and sticks with the first that gets as far as listening. [log], when set, hears about every attempt.
  *
  * Every listen gets a fresh recogniser: on a Galaxy Watch a reused one fails its next start. Once a
  * route has listened, a later failure to start is retried once and then reported as an ordinary
@@ -218,12 +219,11 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
                 }
             }
         })
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-        if (askForEnglish) intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, english)
-        sr.startListening(intent)
+        sr.startListening(
+            SpeechInput.recognizeIntent(if (askForEnglish) english else null)
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+        )
     }
 
     private fun create(route: Route): SpeechRecognizer = when (route) {
@@ -281,7 +281,6 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
     }
 
     companion object {
-        private const val TAG = "ClaudeWatch"
         private const val START_TIMEOUT_MS = 5_000L
         private const val RETRY_DELAY_MS = 400L
 
@@ -326,14 +325,13 @@ class DialogSpeechInput(private val activity: Activity, private val requestCode:
         }
     }
 
-    /** Returns true if the result was this dialog's. */
-    fun handleResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode != this.requestCode) return false
-        val listener = active ?: return true
+    /** Takes a result from [Activity.onActivityResult], if it is this dialog's. */
+    fun handleResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != this.requestCode) return
+        val listener = active ?: return
         active = null
         val text = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (resultCode == Activity.RESULT_OK && !text.isNullOrBlank()) listener.onResult(text) else listener.onNothingHeard()
-        return true
     }
 
     override fun stop() {}

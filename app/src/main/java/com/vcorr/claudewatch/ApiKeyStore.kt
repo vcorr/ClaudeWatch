@@ -26,19 +26,6 @@ object ApiKeyStore {
     fun write(context: Context, key: String): Boolean {
         val trimmed = key.trim()
         if (trimmed.isEmpty()) return false
-        val file = AtomicFile(File(context.filesDir, FILE_NAME))
-        val out = try {
-            file.startWrite()
-        } catch (e: java.io.IOException) {
-            return false
-        }
-        return try {
-            out.write(trimmed.toByteArray(Charsets.UTF_8))
-            file.finishWrite(out)
-            true
-        } catch (e: java.io.IOException) {
-            file.failWrite(out)
-            false
-        }
+        return AtomicFile(File(context.filesDir, FILE_NAME)).writeAll(trimmed.toByteArray(Charsets.UTF_8))
     }
 }

@@ -2,7 +2,6 @@ package com.vcorr.claudewatch
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.health.services.client.HealthServices
@@ -33,7 +32,6 @@ class StepsService : PassiveListenerService() {
     }
 
     companion object {
-        private const val TAG = "ClaudeWatch"
         const val PREFS = "steps"
         const val KEY_STEPS = "daily"
         const val KEY_AT = "at"
@@ -45,7 +43,7 @@ class StepsService : PassiveListenerService() {
          */
         fun register(context: Context) {
             val app = context.applicationContext
-            if (app.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) return
+            if (!app.hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) return
             try {
                 val config = PassiveListenerConfig.builder()
                     .setDataTypes(setOf(DataType.STEPS_DAILY))

@@ -93,7 +93,7 @@
                 android:layout_height="58dp"
                 android:layout_gravity="center"
                 android:background="@drawable/bg_mic_filled"
-                android:contentDescription="Talk to Claude"
+                android:contentDescription="@string/talk_to_claude"
                 android:scaleType="center"
                 android:src="@drawable/ic_mic" />
 
@@ -204,7 +204,7 @@
                 android:layout_height="40dp"
                 android:layout_marginStart="8dp"
                 android:background="@drawable/bg_mic_filled"
-                android:contentDescription="Talk to Claude"
+                android:contentDescription="@string/talk_to_claude"
                 android:scaleType="center"
                 android:src="@drawable/ic_mic"
                 android:tint="@color/ink_on_accent" />

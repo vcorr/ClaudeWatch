@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -26,7 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Phase 1 device probe: reports which speech recognition and TTS routes this watch offers,
+ * Voice diagnostics, opened by a long press on the microphone: reports which speech recognition and TTS routes this watch offers,
  * tries each listening route, and times one API round trip. Results are read off the screen.
  */
 class ProbeActivity : Activity() {
@@ -53,7 +52,7 @@ class ProbeActivity : Activity() {
         findViewById<Button>(R.id.btn_probe_dialog).setOnClickListener { testSystemDialog() }
         findViewById<Button>(R.id.btn_probe_speak).setOnClickListener { testSpeech() }
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
             runChecks()
         } else {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC)
@@ -71,7 +70,7 @@ class ProbeActivity : Activity() {
         val version = packageManager.getPackageInfo(packageName, 0).versionName
         log("ClaudeWatch $version")
         log("${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-        val micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val micGranted = hasPermission(Manifest.permission.RECORD_AUDIO)
         log("Mic permission: ${if (micGranted) "granted" else "DENIED"}")
         log("Watch language: ${java.util.Locale.getDefault().toLanguageTag()}")
 
@@ -248,9 +247,8 @@ class ProbeActivity : Activity() {
     }
 
     private fun testSystemDialog() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+        // Exactly what the app sends when it falls back to the dialog, plus a prompt.
+        val intent = SpeechInput.recognizeIntent()
             .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say something")
         try {
             log("System dialog: opening")

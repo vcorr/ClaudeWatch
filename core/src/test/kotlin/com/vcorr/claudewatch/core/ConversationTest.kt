@@ -68,4 +68,29 @@ class ConversationTest {
         // A clock set back after saving doesn't resurrect a chat from the future.
         assertEquals(false, Conversation.isFresh(savedAtMs = 12 * hour, nowMs = 10 * hour, maxAgeMs = hour))
     }
+
+    @Test
+    fun trimmingToNothingIsRefused() {
+        kotlin.test.assertFailsWith<IllegalArgumentException> { Conversation.trimForRequest(turns(2), 0) }
+    }
+
+    @Test
+    fun restoreSkipsBlankTurns() {
+        val c = Conversation()
+        c.restore(listOf(Turn(Role.USER, " "), Turn(Role.USER, "q"), Turn(Role.ASSISTANT, "a")))
+        assertEquals(listOf("q", "a"), c.all.map { it.text })
+    }
+
+    @Test
+    fun savedChatIsStillFreshAtExactlyItsAge() {
+        assertEquals(true, Conversation.isFresh(savedAtMs = 1_000, nowMs = 2_000, maxAgeMs = 1_000))
+    }
+
+    @Test
+    fun clearEmptiesTheChat() {
+        val c = Conversation()
+        c.addUser("q"); c.addAssistant("a")
+        c.clear()
+        assertEquals(emptyList(), c.all)
+    }
 }

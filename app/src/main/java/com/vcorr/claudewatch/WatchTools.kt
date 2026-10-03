@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.content.ContentUris
 import android.content.Context
-import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -31,6 +30,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -73,14 +75,14 @@ class WatchTools(private val context: Context) {
         )
 
     /** A few words for the screen while a tool runs. */
-    fun progress(name: String): String = when (name) {
+    fun progress(name: String): String? = when (name) {
         "get_location" -> "Finding where you are"
         "get_weather" -> "Checking the weather"
         "get_watch_status" -> "Checking the watch"
         "get_heart_rate" -> "Measuring your pulse; keep still"
         "get_steps" -> "Counting your steps"
         "get_calendar" -> "Checking your calendar"
-        else -> "Thinking"
+        else -> null
     }
 
     /** Runs a tool and returns its result as text for Claude. */
@@ -105,8 +107,8 @@ class WatchTools(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private suspend fun currentLocation(): Location {
-        if (!granted(Manifest.permission.ACCESS_COARSE_LOCATION) && !granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            throw ToolException("Location permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
+        if (!context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            requirePermission(Manifest.permission.ACCESS_COARSE_LOCATION, "Location")
         }
         val lm = context.getSystemService(LocationManager::class.java)
         val providers = buildList {
@@ -234,16 +236,14 @@ class WatchTools(private val context: Context) {
         }
 
         val alarm = context.getSystemService(AlarmManager::class.java).nextAlarmClock?.triggerTime
-        val alarmText = alarm?.let { "Next alarm: ${SimpleDateFormat("EEEE HH:mm", Locale.UK).format(Date(it))}." } ?: "No alarm set."
+        val alarmText = alarm?.let { "Next alarm: ${ukTime("EEEE HH:mm", it)}." } ?: "No alarm set."
         return "Battery $level%, $charging. Connected via $connection. $alarmText"
     }
 
     // ── Heart rate ──────────────────────────────────────────
 
     private suspend fun heartRate(): String {
-        if (!granted(heartRatePermission())) {
-            throw ToolException("Heart rate permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
-        }
+        requirePermission(heartRatePermission(), "Heart rate")
         val sm = context.getSystemService(SensorManager::class.java)
         val sensor = sm.getDefaultSensor(Sensor.TYPE_HEART_RATE)
             ?: throw ToolException("This watch doesn't offer its heart rate sensor to apps.")
@@ -278,9 +278,7 @@ class WatchTools(private val context: Context) {
     // ── Steps ───────────────────────────────────────────────
 
     private suspend fun steps(): String {
-        if (!granted(Manifest.permission.ACTIVITY_RECOGNITION)) {
-            throw ToolException("Physical activity permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
-        }
+        requirePermission(Manifest.permission.ACTIVITY_RECOGNITION, "Physical activity")
         val prefs = context.getSharedPreferences(StepsService.PREFS, Context.MODE_PRIVATE)
         // Steps arrive in batches, so ask for the latest and give it a moment to land.
         val before = prefs.getLong(StepsService.KEY_AT, 0)
@@ -293,25 +291,20 @@ class WatchTools(private val context: Context) {
         if (at == 0L) {
             throw ToolException("No step count has arrived yet. The watch sends steps in batches, so the first may take a while after the app is set up.")
         }
-        val reported = java.util.Calendar.getInstance().apply { timeInMillis = at }
-        val today = java.util.Calendar.getInstance()
-        val sameDay = reported.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
-            reported.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+        val sameDay = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).toLocalDate() == LocalDate.now()
         if (!sameDay) {
             return "The watch hasn't reported a step count since midnight (the last report was on " +
-                "${SimpleDateFormat("EEEE", Locale.UK).format(Date(at))}). That doesn't mean no steps today; " +
+                "${ukTime("EEEE", at)}). That doesn't mean no steps today; " +
                 "the count arrives in batches, and after a restart only once ClaudeWatch has been opened."
         }
         val steps = prefs.getLong(StepsService.KEY_STEPS, 0)
-        return "$steps steps today, as of ${SimpleDateFormat("HH:mm", Locale.UK).format(Date(at))}."
+        return "$steps steps today, as of ${ukTime("HH:mm", at)}."
     }
 
     // ── Calendar ────────────────────────────────────────────
 
     private suspend fun calendar(days: Int): String = withContext(Dispatchers.IO) {
-        if (!granted(Manifest.permission.READ_CALENDAR)) {
-            throw ToolException("Calendar permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
-        }
+        requirePermission(Manifest.permission.READ_CALENDAR, "Calendar")
         val begin = System.currentTimeMillis()
         val end = endOfDay(days)
         // The watch's own calendar store first, then Wear OS's copy of the phone's calendar.
@@ -324,7 +317,7 @@ class WatchTools(private val context: Context) {
             queryEvents(Uri.parse("content://com.google.android.wearable.provider.calendar/instances/when/$begin/$end"))
         }
         if (events.isEmpty()) {
-            return@withContext "No events between now and ${SimpleDateFormat("EEEE", Locale.UK).format(Date(end - 1))} night. " +
+            return@withContext "No events between now and ${ukTime("EEEE", end - 1)} night. " +
                 "If the wearer expects some, their calendar may not sync to the watch."
         }
         events.take(MAX_EVENTS).joinToString(" ")
@@ -360,22 +353,23 @@ class WatchTools(private val context: Context) {
         emptyList()
     }
 
-    private fun endOfDay(days: Int): Long = java.util.Calendar.getInstance().apply {
-        add(java.util.Calendar.DAY_OF_YEAR, days - 1)
-        set(java.util.Calendar.HOUR_OF_DAY, 23)
-        set(java.util.Calendar.MINUTE, 59)
-        set(java.util.Calendar.SECOND, 59)
-    }.timeInMillis
+    /** The last second of the day [days] - 1 days from today (1 = tonight), in the watch's time zone. */
+    private fun endOfDay(days: Int): Long =
+        LocalDate.now().plusDays(days - 1L).atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     // ── Helpers ─────────────────────────────────────────────
 
-    private fun granted(permission: String) =
-        context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+    /** A refused permission becomes a message Claude passes on: what to allow, and where. */
+    private fun requirePermission(permission: String, name: String) {
+        if (!context.hasPermission(permission)) {
+            throw ToolException("$name permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
+        }
+    }
 
     private suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 15_000
+            connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+            readTimeout = HTTP_READ_TIMEOUT_MS
         }
         try {
             if (conn.responseCode != 200) throw ToolException("The weather service answered HTTP ${conn.responseCode}.")
@@ -390,10 +384,12 @@ class WatchTools(private val context: Context) {
         private const val HEART_RATE_TIMEOUT_MS = 20_000L
         private const val STEPS_FLUSH_WAIT_MS = 1_500L
         private const val MAX_EVENTS = 15
+        private const val HTTP_CONNECT_TIMEOUT_MS = 10_000
+        private const val HTTP_READ_TIMEOUT_MS = 15_000
 
         /** Android 16 replaced BODY_SENSORS with a heart-rate permission for apps that target it. */
         fun heartRatePermission(): String =
-            if (Build.VERSION.SDK_INT >= 36) "android.permission.health.READ_HEART_RATE" else Manifest.permission.BODY_SENSORS
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) "android.permission.health.READ_HEART_RATE" else Manifest.permission.BODY_SENSORS
 
         /** Everything the tools may need, asked for together with the microphone. */
         fun permissions(): Array<String> = arrayOf(

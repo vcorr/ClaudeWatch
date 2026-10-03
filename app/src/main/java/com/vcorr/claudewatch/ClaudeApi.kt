@@ -19,14 +19,10 @@ import java.io.IOException
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.TimeZone
 
 object ClaudeApi {
 
-    private const val TAG = "ClaudeWatch"
     private const val ENDPOINT = "https://api.anthropic.com/v1/messages"
     private const val MODEL = "claude-haiku-4-5"
 
@@ -51,14 +47,18 @@ object ClaudeApi {
     // Rounds of tool calls in one reply before giving up; a spoken question rarely needs more than two.
     private const val MAX_ROUNDS = 5
 
-    /** One question with no history and no tools, used by the voice test. */
+    private const val CONNECT_TIMEOUT_MS = 15_000
+    private const val READ_TIMEOUT_MS = 60_000
+
+    /** One question with no history and no tools: the diagnostics' round-trip check. */
     suspend fun ask(prompt: String, apiKey: String): String =
         reply(listOf(Turn(Role.USER, prompt)), apiKey, tools = null).text
 
     /**
      * Sends the conversation and returns Claude's reply, ready to show and speak. When Claude asks
      * for a watch tool, it runs here and the answer goes back, until Claude replies in words.
-     * [onProgress] hears what the watch is doing meanwhile, such as "Checking the weather".
+     * [onProgress] hears what the watch is doing meanwhile, such as "Checking the weather", and
+     * null once Claude is thinking again.
      * [onText] hears Claude's words as they stream in, on a background thread, so speaking can
      * start before the reply is complete; it hears every text block, including any said before a
      * tool call ("Let me check").
@@ -67,7 +67,7 @@ object ClaudeApi {
         history: List<Turn>,
         apiKey: String,
         tools: WatchTools?,
-        onProgress: (String) -> Unit = {},
+        onProgress: (String?) -> Unit = {},
         onText: (String) -> Unit = {},
     ): Reply = withContext(Dispatchers.IO) {
         try {
@@ -83,7 +83,7 @@ object ClaudeApi {
         apiKey: String,
         tools: WatchTools?,
         withSearch: Boolean,
-        onProgress: (String) -> Unit,
+        onProgress: (String?) -> Unit,
         onText: (String) -> Unit,
     ): Reply {
         val messages = JSONArray()
@@ -126,7 +126,7 @@ object ClaudeApi {
                         if (block.optString("type") != "tool_use") continue
                         val name = block.optString("name")
                         used += name
-                        onProgress(tools?.progress(name) ?: "Thinking")
+                        onProgress(tools?.progress(name))
                         val result = JSONObject().put("type", "tool_result").put("tool_use_id", block.optString("id"))
                         try {
                             result.put("content", tools?.run(name, block.optJSONObject("input") ?: JSONObject()) ?: "No tools available.")
@@ -139,7 +139,7 @@ object ClaudeApi {
                         results.put(result)
                     }
                     messages.put(JSONObject().put("role", "user").put("content", results))
-                    onProgress("Thinking")
+                    onProgress(null)
                 }
                 // The server paused a long search; sending its turn back lets it carry on.
                 "pause_turn" -> messages.put(JSONObject().put("role", "assistant").put("content", content))
@@ -177,9 +177,9 @@ object ClaudeApi {
             setRequestProperty("x-api-key", apiKey)
             setRequestProperty("anthropic-version", "2023-06-01")
             doOutput = true
-            connectTimeout = 15_000
+            connectTimeout = CONNECT_TIMEOUT_MS
             // Between streamed events; a search can leave a gap of several seconds.
-            readTimeout = 60_000
+            readTimeout = READ_TIMEOUT_MS
         }
         // A blocked read doesn't notice cancellation; dropping the connection ends it at once.
         val hangUp = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -300,10 +300,8 @@ object ClaudeApi {
     }
 
     /** Today's date and time where the wearer is, which Claude can't otherwise know. */
-    private fun now(): String {
-        val format = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.UK)
-        return "It is now ${format.format(Date())} in the ${TimeZone.getDefault().id} time zone."
-    }
+    private fun now(): String =
+        "It is now ${ukTime("EEEE d MMMM yyyy, HH:mm", System.currentTimeMillis())} in the ${TimeZone.getDefault().id} time zone."
 
     private fun errorMessage(body: String, code: Int): String = try {
         JSONObject(body).getJSONObject("error").getString("message")

@@ -20,7 +20,9 @@
     <!-- Steps today, from Health Services' passive feed. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
-    <!-- API 30+ hides these from apps that don't declare them; the voice test needs to see them. -->
+    <!-- API 30+ hides these from apps that don't declare them. The app needs them, not just the
+         diagnostics: in-app listening finds its speech services this way, and the speaker
+         looks for Google's TTS engine. -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />

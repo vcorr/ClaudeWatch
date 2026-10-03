@@ -25,6 +25,8 @@ class KeySetupServer(
 
     val pin: String = (SecureRandom().nextInt(900_000) + 100_000).toString()
 
+    // Set on the main thread, closed from the server thread when a key is saved.
+    @Volatile
     private var serverSocket: ServerSocket? = null
 
     @Volatile
