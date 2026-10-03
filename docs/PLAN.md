@@ -103,6 +103,8 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 
 ## Phase 5 — Conversations that persist
 
+**Status (3 Oct 2026), partly built:** the current chat is saved after each answer (`ConversationStore`, one `AtomicFile`) and resumed if the app is reopened within 30 minutes; New chat clears it. Connection and API errors are shown and spoken. Still to do: several stored chats, "Delete all chats", the 429/529 retry and the model setting.
+
 - One JSON file per conversation, written with `AtomicFile`; reopen the latest on launch; "New chat" and "Delete all chats".
 - History sent each turn is trimmed in user/assistant *pairs*, always starting with a user message.
 - Scrollable transcript with rotary-crown scrolling; replies stored in full.
@@ -122,6 +124,8 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 
 ## Phase 6 — Faster replies
 
+**Status (3 Oct 2026): built, awaiting the device checklist.** Replies stream; each finished sentence (`SpokenText.completeLength`, unit-tested) is spoken while the rest arrives, and the text grows on screen. Stopping part-way keeps what was heard as the answer. Reviewed by a sub-agent before and after its fixes.
+
 - Stream the reply (server-sent events). Each complete sentence goes to TTS with `QUEUE_ADD` and its own utterance ID. The follow-up window starts on `onDone` of the final ID.
 - Interrupting mid-stream also cancels the stream and disconnects the request (audio focus and `tts.stop()` already exist from Phase 3).
 - Unit tests for the SSE parser and the sentence splitter (abbreviations, decimals, "e.g.").
@@ -130,6 +134,8 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 *Device checklist:* first words arrive noticeably sooner than in Phase 5; interrupting mid-stream stops both the speech and the request.
 
 ## Phase 7 — Quick access
+
+**Status (3 Oct 2026):** the owner maps the Home key's double press to ClaudeWatch; returning to the app that way listens again, and the app closes itself 8 s after a conversation ends in silence. The tile is still to do.
 
 - A tile with a "Talk" button.
 - README instructions for mapping the side button's double press to the app.
