@@ -13,6 +13,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Bundle
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.MotionEvent
@@ -39,8 +40,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
-import java.net.SocketTimeoutException
 import java.net.Inet4Address
 
 class MainActivity : Activity() {
@@ -109,6 +111,11 @@ class MainActivity : Activity() {
     // the Home key, say) listens again, as a fresh launch does. Not set for our own screens.
     private var listenOnReturn = false
     private var leavingForOwnScreen = false
+    // Set for a listen the wearer didn't ask for in so many words (a launch or a return), so
+    // silence then closes the app instead of leaving it open.
+    private var closeIfSilent = false
+    // Saving and clearing the chat run one at a time, so a clear can't be overtaken by a save.
+    private val storeLock = Mutex()
     private var listenAfterPermission = false
     private var toolPermissionsAsked = false
 
@@ -172,7 +179,11 @@ class MainActivity : Activity() {
         btnCancel.setOnClickListener { interrupt(null) }
         // While Claude talks, or waits for a follow-up, a tap anywhere stops it, not just the button.
         val stopAnywhere = View.OnClickListener {
-            if (state == State.SPEAKING || state == State.FOLLOW_UP) interrupt(null)
+            when (state) {
+                State.SPEAKING, State.FOLLOW_UP -> interrupt(null)
+                State.IDLE -> speaker.stop() // a spoken error
+                else -> Unit
+            }
         }
         layoutVoice.setOnClickListener(stopAnywhere)
         tvReply.setOnClickListener(stopAnywhere)
@@ -231,6 +242,8 @@ class MainActivity : Activity() {
         super.onResume()
         // A permission prompt may only pause the app, never stopping it; either way it's over now.
         leavingForOwnScreen = false
+        val returning = listenOnReturn
+        listenOnReturn = false
         if (dialogInput.isOpen) return
         scope.launch {
             // Also restarts setup after a pause, e.g. when it was opened because the key was rejected.
@@ -238,10 +251,9 @@ class MainActivity : Activity() {
                 showSetup(setupNotice)
             } else if (listenOnLaunch) {
                 listenOnLaunch = false
-                startListening(followUp = false)
-            } else if (listenOnReturn) {
-                listenOnReturn = false
-                if (state == State.IDLE) startListening(followUp = false)
+                startListening(followUp = false, unprompted = true)
+            } else if (returning && state == State.IDLE) {
+                startListening(followUp = false, unprompted = true)
             }
         }
     }
@@ -259,7 +271,10 @@ class MainActivity : Activity() {
         if (dialogInput.isOpen) return
         // Back from our own screens (diagnostics, permission prompts) stays as it was; back from
         // anywhere else listens, as a fresh launch would.
-        listenOnReturn = !leavingForOwnScreen && !listenAfterPermission
+        // The screen going off (timeout, wrist down) also stops the app on Wear OS; waking it to reread
+        // a reply must not open the microphone, so only a stop with the screen on counts as leaving.
+        val screenOn = getSystemService(PowerManager::class.java).isInteractive
+        listenOnReturn = screenOn && !leavingForOwnScreen && !listenAfterPermission
         leavingForOwnScreen = false
         // The microphone may only be used while the app is visible; a reply may finish speaking.
         if (state == State.LISTENING || state == State.FOLLOW_UP) interrupt(null)
@@ -322,7 +337,7 @@ class MainActivity : Activity() {
             dialogInput
         }
 
-    private fun startListening(followUp: Boolean) {
+    private fun startListening(followUp: Boolean, unprompted: Boolean = false) {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             listenAfterPermission = true
             leavingForOwnScreen = true
@@ -339,6 +354,7 @@ class MainActivity : Activity() {
             return
         }
         cancelClose()
+        closeIfSilent = unprompted
         // Never listen over our own voice, such as a spoken error.
         speaker.stop()
         val token = ++turnToken
@@ -390,10 +406,10 @@ class MainActivity : Activity() {
                 if (followUp) {
                     endConversation()
                 } else {
-                    // Silence after a launch is often a launch by mistake: a buzz, not a voice, and
-                    // the app closes itself unless touched.
+                    // A buzz, not a voice. Silence after a launch is often a launch by mistake, so
+                    // then the app also closes itself unless touched.
                     goIdle("Didn't catch that", problem = true)
-                    scheduleClose()
+                    if (closeIfSilent) scheduleClose()
                 }
             }
 
@@ -403,7 +419,7 @@ class MainActivity : Activity() {
                 if (routeUnavailable && input !== dialogInput) {
                     // No in-app speech service works here: use the system dialog for this session.
                     useDialog = true
-                    startListening(followUp)
+                    startListening(followUp, closeIfSilent)
                     return
                 }
                 goIdle(message, problem = true, spoken = "Sorry, I couldn't listen just then.")
@@ -442,7 +458,7 @@ class MainActivity : Activity() {
                 }
                 if (token != turnToken) return@launch
                 conversation.addAssistant(reply.text)
-                ConversationStore.save(this@MainActivity, conversation.all)
+                saveChat()
                 shownQuestion = text
                 shownReply = reply.text
                 tvReply.text = reply.display
@@ -456,7 +472,7 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 if (token != turnToken) return@launch
                 conversation.dropUnanswered()
-                if (e is IOException || e is SocketTimeoutException) {
+                if (e is IOException) {
                     goIdle("No connection to Claude", problem = true, spoken = "I can't reach Claude right now. Check the watch's connection.")
                 } else {
                     goIdle(
@@ -532,6 +548,12 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Saves the chat in the background, after the reply is on its way, one write at a time. */
+    private fun saveChat() {
+        val snapshot = conversation.all
+        scope.launch { storeLock.withLock { ConversationStore.save(this@MainActivity, snapshot) } }
+    }
+
     private fun cancelClose() {
         closeJob?.cancel()
         closeJob = null
@@ -540,7 +562,7 @@ class MainActivity : Activity() {
     private fun newChat() {
         interrupt(null)
         conversation.clear()
-        scope.launch { ConversationStore.clear(this@MainActivity) }
+        scope.launch { storeLock.withLock { ConversationStore.clear(this@MainActivity) } }
         shownQuestion = ""
         shownReply = null
         tvReply.text = ""

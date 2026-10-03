@@ -45,6 +45,7 @@ class Speaker(context: Context) {
     private var lastUtteranceId: String? = null
     private var counter = 0
     private var restoreVolume: Int? = null
+    private var raisedTo: Int? = null
 
     /** The engine and voice in use, for the diagnostics screen. */
     var description = "starting"
@@ -61,8 +62,11 @@ class Speaker(context: Context) {
         created = TextToSpeech(appContext, { status ->
             main.post {
                 if (tts !== created) return@post
-                if (status == TextToSpeech.SUCCESS) {
-                    configure()
+                if (status == TextToSpeech.SUCCESS && !configure() && enginePackage != null) {
+                    // Google's engine started but has no English voice installed: use the default.
+                    created?.shutdown()
+                    start(null)
+                } else if (status == TextToSpeech.SUCCESS) {
                     ready = true
                     queued?.let { (text, done) -> speak(text, done) }
                     queued = null
@@ -81,12 +85,20 @@ class Speaker(context: Context) {
         tts = created
     }
 
-    private fun configure() {
-        val tts = tts ?: return
+    /** Sets the engine up; false if it has no usable English voice. */
+    private fun configure(): Boolean {
+        val tts = tts ?: return false
         tts.setAudioAttributes(attributes)
         val voice = bestVoice(tts)
-        if (voice != null) tts.voice = voice else tts.setLanguage(locale)
+        val speaks = if (voice != null) {
+            tts.voice = voice
+            true
+        } else {
+            tts.setLanguage(locale) >= TextToSpeech.LANG_AVAILABLE ||
+                tts.setLanguage(Locale.ENGLISH) >= TextToSpeech.LANG_AVAILABLE
+        }
         tts.setSpeechRate(SPEECH_RATE)
+        // The engine asked for; if it can't bind, the framework may quietly use another.
         description = "${engine ?: tts.defaultEngine}, ${voice?.name ?: locale.toLanguageTag()}"
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
@@ -98,6 +110,7 @@ class Speaker(context: Context) {
 
             override fun onError(utteranceId: String?, errorCode: Int) = finishIfLast(utteranceId)
         })
+        return speaks
     }
 
     /** An installed, offline voice in the watch's English if there is one, else any installed English voice. */
@@ -176,13 +189,20 @@ class Speaker(context: Context) {
         val floor = (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * MIN_VOLUME_FRACTION).toInt()
         if (current in 1 until floor) {
             runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, floor, 0) }
-                .onSuccess { restoreVolume = current }
+                .onSuccess {
+                    restoreVolume = current
+                    raisedTo = floor
+                }
         }
     }
 
+    /** Puts the volume back, unless the wearer changed it meanwhile; their choice then stands. */
     private fun restoreQuietVolume() {
         val original = restoreVolume ?: return
+        val raised = raisedTo
         restoreVolume = null
+        raisedTo = null
+        if (audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) != raised) return
         runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, original, 0) }
     }
 
