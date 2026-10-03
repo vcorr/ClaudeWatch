@@ -41,6 +41,13 @@ object ClaudeApi {
             "know, and if current information would help, say so briefly and offer to look it up. " +
             "Don't read out web addresses."
 
+    // The conversation's language. Tool results and these instructions stay in English; Claude
+    // answers in Finnish while the watch can hear and speak it.
+    private const val IN_FINNISH =
+        "The wearer speaks Finnish: reply in natural spoken Finnish (suomeksi) unless they ask for " +
+            "another language. Write numbers, times and units the way a Finn would say them."
+    private const val IN_ENGLISH = "Reply in English."
+
     // Paid web search runs only when asked for, and once per reply at most.
     private const val MAX_SEARCHES = 1
 
@@ -61,20 +68,22 @@ object ClaudeApi {
      * null once Claude is thinking again.
      * [onText] hears Claude's words as they stream in, on a background thread, so speaking can
      * start before the reply is complete; it hears every text block, including any said before a
-     * tool call ("Let me check").
+     * tool call ("Let me check"). [finnish] says the conversation is in Finnish (see [Language]).
      */
     suspend fun reply(
         history: List<Turn>,
         apiKey: String,
         tools: WatchTools?,
+        finnish: Boolean = false,
         onProgress: (String?) -> Unit = {},
         onText: (String) -> Unit = {},
     ): Reply = withContext(Dispatchers.IO) {
+        val system = "$SYSTEM_PROMPT ${if (finnish) IN_FINNISH else IN_ENGLISH} ${now()}"
         try {
-            converse(history, apiKey, tools, withSearch = tools != null, onProgress, onText)
+            converse(history, apiKey, tools, system, withSearch = tools != null, onProgress, onText)
         } catch (e: SearchUnavailableException) {
             // If this account or model can't use web search, answer without it rather than fail.
-            converse(history, apiKey, tools, withSearch = false, onProgress, onText)
+            converse(history, apiKey, tools, system, withSearch = false, onProgress, onText)
         }
     }
 
@@ -82,6 +91,7 @@ object ClaudeApi {
         history: List<Turn>,
         apiKey: String,
         tools: WatchTools?,
+        system: String,
         withSearch: Boolean,
         onProgress: (String?) -> Unit,
         onText: (String) -> Unit,
@@ -113,7 +123,7 @@ object ClaudeApi {
         repeat(MAX_ROUNDS) { round ->
             // Each round's words start a new sentence, never run on from the last round's.
             if (round > 0) onText(" ")
-            val json = post(messages, toolList, apiKey, withSearch, onText)
+            val json = post(messages, toolList, apiKey, system, withSearch, onText)
             val stopReason = json.optString("stop_reason")
             val content = json.getJSONArray("content")
             when (stopReason) {
@@ -158,6 +168,7 @@ object ClaudeApi {
         messages: JSONArray,
         tools: JSONArray,
         apiKey: String,
+        system: String,
         withSearch: Boolean,
         onText: (String) -> Unit,
     ): JSONObject = coroutineScope {
@@ -166,7 +177,7 @@ object ClaudeApi {
         val body = JSONObject()
             .put("model", MODEL)
             .put("max_tokens", MAX_TOKENS)
-            .put("system", "$SYSTEM_PROMPT ${now()}")
+            .put("system", system)
             .put("messages", messages)
             .put("stream", true)
         if (tools.length() > 0) body.put("tools", tools)

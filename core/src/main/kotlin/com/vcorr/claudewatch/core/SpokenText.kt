@@ -5,6 +5,8 @@ object SpokenText {
 
     private val abbreviations = setOf(
         "e.g", "i.e", "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "approx", "no", "fig",
+        // Finnish: esimerkiksi, muun muassa, ja niin edelleen, niin sanottu, kello, kappaletta…
+        "esim", "mm", "jne", "ns", "yms", "tms", "ym", "klo", "kpl", "vrt", "ks", "ts", "puh", "tri",
     )
     private const val CLOSERS = "\"')]”’"
     private const val MID_LINE = "\u0000"
@@ -20,7 +22,9 @@ object SpokenText {
         s = s.replace(Regex("```[A-Za-z0-9]*"), "")
         s = s.replace(Regex("\\[([^\\]]+)]\\([^)]+\\)"), "$1")
         s = s.replace(Regex("(?m)^\\s{0,3}#{1,6}\\s*"), "")
-        s = s.replace(Regex("(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+"), "")
+        // A number with a full stop starts a list item only before a capital: "1. Tea", but not
+        // the Finnish date "3. lokakuuta".
+        s = s.replace(Regex("(?m)^\\s*(?:[-*•]|\\d+\\)|\\d+\\.(?=\\s+[\\p{Lu}*_]))\\s+"), "")
         s = s.replace("*", "").replace("`", "")
         // Each line becomes a sentence, so list items aren't run together when spoken.
         return s.replace(MID_LINE, "").lines()
@@ -46,7 +50,8 @@ object SpokenText {
                 }
                 val atEnd = i + 1 >= text.length
                 val spaceFollows = !atEnd && text[i + 1].isWhitespace()
-                if ((atEnd || spaceFollows) && !(c == '.' && endsWithAbbreviation(current))) {
+                val ordinal = c == '.' && ordinalAt(text, i, current) == true
+                if ((atEnd || spaceFollows) && !ordinal && !(c == '.' && endsWithAbbreviation(current))) {
                     current.toString().trim().takeIf { it.isNotEmpty() }?.let(out::add)
                     current.clear()
                 }
@@ -79,7 +84,9 @@ object SpokenText {
                 // Elsewhere, as in "The answer is 4. Anything else?", it does.
                 val line = text.substring(text.lastIndexOf('\n', i) + 1, i + 1).trim()
                 val listNumber = c == '.' && line.dropLast(1).let { it.isNotEmpty() && it.all(Char::isDigit) }
-                if (spaceFollows && !listNumber && !(c == '.' && endsWithAbbreviation(current))) {
+                // A number's full stop waits to see the next word: "3. lokakuuta" goes on.
+                val ordinal = c == '.' && ordinalAt(text, i, current) != false
+                if (spaceFollows && !listNumber && !ordinal && !(c == '.' && endsWithAbbreviation(current))) {
                     end = i + 1
                     current.clear()
                 }
@@ -99,6 +106,20 @@ object SpokenText {
         if (trimmed.trimEnd(*CLOSERS.toCharArray()).lastOrNull()?.let { it in ".!?" } != false) return trimmed
         val parts = sentences(trimmed)
         return if (parts.size > 1) parts.dropLast(1).joinToString(" ") else trimmed
+    }
+
+    /**
+     * Whether the full stop at [dot] ends a Finnish ordinal ("3. lokakuuta", "1. päivä") rather
+     * than a sentence: a number followed by a word in lower case. Null when the next word hasn't
+     * arrived yet.
+     */
+    private fun ordinalAt(text: String, dot: Int, sentence: CharSequence): Boolean? {
+        val word = sentence.toString().trimEnd('.').takeLastWhile { !it.isWhitespace() }
+        if (word.isEmpty() || !word.all(Char::isDigit)) return false
+        var next = dot + 1
+        while (next < text.length && text[next].isWhitespace()) next++
+        if (next >= text.length) return null
+        return text[next].isLowerCase()
     }
 
     private fun endsWithAbbreviation(sentence: CharSequence): Boolean {

@@ -119,4 +119,22 @@ class SpokenTextTest {
     fun spokenSentencesCleansThenSplits() {
         assertEquals(listOf("Tea is calming.", "Coffee wakes you."), SpokenText.spokenSentences("- **Tea** is calming\n- Coffee wakes you"))
     }
+
+    @Test
+    fun finnishDatesDoNotEndSentences() {
+        assertEquals(listOf("Tänään on 3. lokakuuta.", "Sataa."), SpokenText.sentences("Tänään on 3. lokakuuta. Sataa."))
+        assertEquals("3. lokakuuta sataa.", SpokenText.clean("3. lokakuuta sataa"))
+    }
+
+    @Test
+    fun completeLengthWaitsToSeeWhetherANumberIsADate() {
+        assertEquals(0, SpokenText.completeLength("Tänään on 3. "))
+        assertEquals("Tänään on 3. lokakuuta.".length, SpokenText.completeLength("Tänään on 3. lokakuuta. Sa"))
+    }
+
+    @Test
+    fun finnishAbbreviationsDoNotEndSentences() {
+        assertEquals(listOf("Ota esim. omena.", "Hyvä."), SpokenText.sentences("Ota esim. omena. Hyvä."))
+        assertEquals(listOf("Tavataan klo 15.", "Sopiiko?"), SpokenText.sentences("Tavataan klo 15. Sopiiko?"))
+    }
 }

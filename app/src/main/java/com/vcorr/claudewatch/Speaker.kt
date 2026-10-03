@@ -20,8 +20,9 @@ import java.util.Locale
  * when streaming, [end] has been called), or straight away if TTS is unavailable. Call from the
  * main thread.
  *
- * It prefers Google's engine, which is installed on Galaxy Watches beside Samsung's default, and
- * picks the best installed voice in the watch's English. While it talks it lifts a near-silent
+ * It prefers an engine with a Finnish voice, Google's first (installed on Galaxy Watches beside
+ * Samsung's default), and speaks Finnish while the conversation is Finnish ([Language]); with no
+ * Finnish voice anywhere it settles on the best English one and turns Finnish off. While it talks it lifts a near-silent
  * media volume to an audible floor and puts it back afterwards; a muted watch stays muted.
  */
 class Speaker(context: Context) {
@@ -57,57 +58,81 @@ class Speaker(context: Context) {
     var description = "starting"
         private set
 
+    // Engines to try, best first: Google's (installed beside Samsung's on Galaxy Watches), then
+    // the watch's default (null). An engine with a Finnish voice wins; failing that, the first one
+    // that speaks English.
+    private val candidates: List<String?> = listOfNotNull(GOOGLE_TTS.takeIf { installed(it) }) + listOf<String?>(null)
+    private var englishOnly = -1
+    private var englishVoice: Voice? = null
+    private var finnishVoice: Voice? = null
+    private var hasFinnish = false
+    private var speakingFinnish: Boolean? = null
+
     init {
-        val google = GOOGLE_TTS.takeIf { installed(it) }
-        start(google)
+        start(0)
     }
 
-    private fun start(enginePackage: String?) {
+    /** Starts candidate engine [index]; [settle] means take it whatever it can do. */
+    private fun start(index: Int, settle: Boolean = false) {
+        val enginePackage = candidates[index]
         engine = enginePackage
         var created: TextToSpeech? = null
         created = TextToSpeech(appContext, { status ->
             main.post {
                 if (tts !== created) return@post
-                if (status == TextToSpeech.SUCCESS && !configure() && enginePackage != null) {
-                    // Google's engine started but has no English voice installed: use the default.
-                    created?.shutdown()
-                    start(null)
-                } else if (status == TextToSpeech.SUCCESS) {
-                    ready = true
-                    val pending = waiting.toList()
-                    waiting.clear()
-                    pending.forEach(::add)
-                    finishIfIdle()
-                } else if (enginePackage != null) {
-                    // Google's engine wouldn't start: fall back to the watch's default.
-                    created?.shutdown()
-                    start(null)
-                } else {
-                    failed = true
-                    description = "unavailable"
-                    waiting.clear()
-                    finishIfIdle()
+                val usable = status == TextToSpeech.SUCCESS && configure()
+                if (usable && (hasFinnish || settle)) {
+                    becomeReady()
+                    return@post
+                }
+                if (usable && englishOnly < 0) englishOnly = index
+                val next = index + 1
+                when {
+                    next < candidates.size -> {
+                        created?.shutdown()
+                        start(next)
+                    }
+                    // No engine has Finnish: settle for the best English one.
+                    englishOnly == index -> becomeReady()
+                    englishOnly >= 0 -> {
+                        created?.shutdown()
+                        start(englishOnly, settle = true)
+                    }
+                    else -> {
+                        failed = true
+                        description = "unavailable"
+                        Language.finnishSpoken = false
+                        waiting.clear()
+                        finishIfIdle()
+                    }
                 }
             }
         }, enginePackage)
         tts = created
     }
 
-    /** Sets the engine up; false if it has no usable English voice. */
+    private fun becomeReady() {
+        Language.finnishSpoken = hasFinnish
+        ready = true
+        val pending = waiting.toList()
+        waiting.clear()
+        pending.forEach(::add)
+        finishIfIdle()
+    }
+
+    /** Sets the engine up and finds its voices; false if it can speak neither English nor Finnish. */
     private fun configure(): Boolean {
         val tts = tts ?: return false
         tts.setAudioAttributes(attributes)
-        val voice = bestVoice(tts)
-        val speaks = if (voice != null) {
-            tts.voice = voice
-            true
-        } else {
-            tts.setLanguage(locale) >= TextToSpeech.LANG_AVAILABLE ||
-                tts.setLanguage(Locale.ENGLISH) >= TextToSpeech.LANG_AVAILABLE
-        }
+        englishVoice = bestVoice(tts, "en", locale.country)
+        finnishVoice = bestVoice(tts, "fi", "FI")
+        val hasEnglish = englishVoice != null || available(tts, locale) || available(tts, Locale.ENGLISH)
+        hasFinnish = finnishVoice != null || available(tts, Language.FINNISH)
+        speakingFinnish = null
         tts.setSpeechRate(SPEECH_RATE)
         // The engine asked for; if it can't bind, the framework may quietly use another.
-        description = "${engine ?: tts.defaultEngine}, ${voice?.name ?: locale.toLanguageTag()}"
+        description = "${engine ?: tts.defaultEngine}, English: ${englishVoice?.name ?: if (hasEnglish) "default" else "none"}, " +
+            "Finnish: ${finnishVoice?.name ?: if (hasFinnish) "default" else "none"}"
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
 
@@ -118,24 +143,41 @@ class Speaker(context: Context) {
 
             override fun onError(utteranceId: String?, errorCode: Int) = finishIfLast(utteranceId)
         })
-        return speaks
+        return hasEnglish || hasFinnish
     }
 
-    /** An installed, offline voice in the watch's English if there is one, else any installed English voice. */
-    private fun bestVoice(tts: TextToSpeech): Voice? {
-        val usable = runCatching { tts.voices }.getOrNull().orEmpty().filter { voice ->
-            voice.locale.language == "en" &&
-                TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in voice.features.orEmpty() &&
-                !voice.isNetworkConnectionRequired
+    private fun available(tts: TextToSpeech, locale: Locale) =
+        runCatching { tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
+
+    /** Speaks in the conversation's language: Finnish while [Language.finnish] holds, else English. */
+    private fun useLanguage() {
+        val tts = tts ?: return
+        val finnish = Language.finnish && hasFinnish
+        if (speakingFinnish == finnish) return
+        speakingFinnish = finnish
+        if (finnish) {
+            finnishVoice?.let { tts.voice = it } ?: tts.setLanguage(Language.FINNISH)
+        } else {
+            englishVoice?.let { tts.voice = it } ?: run {
+                if (tts.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) tts.setLanguage(Locale.ENGLISH)
+            }
         }
-        return usable
+    }
+
+    /** An installed, offline voice in [language], preferring [country]; null if there is none. */
+    private fun bestVoice(tts: TextToSpeech, language: String, country: String): Voice? =
+        runCatching { tts.voices }.getOrNull().orEmpty()
+            .filter { voice ->
+                voice.locale.language == language &&
+                    TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in voice.features.orEmpty() &&
+                    !voice.isNetworkConnectionRequired
+            }
             .sortedWith(
-                compareByDescending<Voice> { it.locale.country == locale.country }
+                compareByDescending<Voice> { it.locale.country == country }
                     .thenByDescending { it.quality }
                     .thenBy { it.latency }
             )
             .firstOrNull()
-    }
 
     /** Speaks a whole reply. */
     fun speak(text: String, onDone: () -> Unit) {
@@ -160,6 +202,7 @@ class Speaker(context: Context) {
             return
         }
         holdAudio()
+        useLanguage()
         val id = "u${++counter}"
         // A refused sentence gets no callback, so it mustn't become the one being waited for.
         if (tts.speak(sentence, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.SUCCESS) {

@@ -107,8 +107,12 @@ class ProbeActivity : Activity() {
             }
             log("TTS engines: ${engine.engines.joinToString { it.label }}")
             log("Default engine: ${engine.defaultEngine}")
-            val english = engine.voices.orEmpty().filter { it.locale.language == "en" }
+            val voices = engine.voices.orEmpty()
+            val english = voices.filter { it.locale.language == "en" }
+            val finnish = voices.filter { it.locale.language == "fi" }
             log("English voices: ${english.size}, offline: ${english.count { !it.isNetworkConnectionRequired }}")
+            log("Finnish voices: ${finnish.size}, offline: ${finnish.count { !it.isNetworkConnectionRequired }}")
+            log("Conversation language so far: ${if (Language.finnish) "Finnish" else "English"} (Test speaking names the app's own voices)")
         }
 
         log("— Claude round trip —")
@@ -161,6 +165,7 @@ class ProbeActivity : Activity() {
     private class Trial(val label: String, val language: String?, val partials: Boolean, val preferOffline: Boolean)
 
     private val trials = listOf(
+        Trial("fi-FI", Language.FINNISH_TAG, partials = true, preferOffline = false),
         Trial("en-US", "en-US", partials = true, preferOffline = false),
         Trial("en-GB", "en-GB", partials = true, preferOffline = false),
         Trial("watch language", null, partials = true, preferOffline = false),
@@ -177,7 +182,7 @@ class ProbeActivity : Activity() {
     private fun testInAppListening() {
         stopTrials()
         val run = ++trialRun
-        log("Trials: say \"one two three\" each time it says Speak")
+        log("Trials: each time it says Speak, say \"yksi kaksi kolme\" for fi-FI, \"one two three\" for the rest")
         runTrial(run, 0)
     }
 
@@ -277,7 +282,9 @@ class ProbeActivity : Activity() {
     private fun testSpeech() {
         val sp = speaker ?: Speaker(this).also { speaker = it }
         log("Speaking a sample. Was it loud and clear enough?")
-        sp.speak("This is how Claude will sound on your watch.") { log("Voice: ${sp.description}") }
+        sp.speak(Language.say("This is how Claude will sound on your watch.", "Näin Claude kuulostaa kellossasi.")) {
+            log("Voice: ${sp.description}")
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────

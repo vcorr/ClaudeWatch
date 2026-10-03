@@ -42,7 +42,7 @@ interface SpeechInput {
 
     companion object {
         /** A free-form recognition request, in [language] (none: the watch's own language). */
-        fun recognizeIntent(language: String? = englishTag()): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        fun recognizeIntent(language: String? = Language.recognitionTag()): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .apply { if (language != null) putExtra(RecognizerIntent.EXTRA_LANGUAGE, language) }
 
@@ -76,8 +76,9 @@ interface SpeechInput {
  * A watch can have several speech routes: the default service, an on-device recogniser (API 31+),
  * and each installed service (a Galaxy Watch has Google's and Samsung's). The default may refuse
  * other apps, and a service may lack a model for the language asked. So this tries each route in
- * turn, first asking for the watch's English ([SpeechInput.englishTag]) and then, if the language is
- * the problem, for no language at all, and sticks with the first that gets as far as listening. [log], when set, hears about every attempt.
+ * turn, asking first for the conversation's language (Finnish, unless that has already failed, see
+ * [Language]), then the watch's English, then no language at all, and sticks with the first that
+ * gets as far as listening. A recogniser without Finnish turns Finnish off for the run. [log], when set, hears about every attempt.
  *
  * Every listen gets a fresh recogniser: on a Galaxy Watch a reused one fails its next start. Once a
  * route has listened, a later failure to start is retried once and then reported as an ordinary
@@ -96,8 +97,9 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
     private val main = Handler(Looper.getMainLooper())
     private val routes: List<Route> by lazy { findRoutes(context) }
     private var routeIndex = 0
-    private var askForEnglish = true
-    private val english = SpeechInput.englishTag()
+    // The languages to ask for, best first, and which one this attempt uses.
+    private var languages: List<String?> = emptyList()
+    private var languageIndex = 0
 
     // The route that has listened this session, and whether this start has had its one retry.
     private var provenRoute = -1
@@ -113,6 +115,8 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
         cancel()
         active = listener
         retried = false
+        languages = listOf(Language.recognitionTag(), SpeechInput.englishTag(), null).distinct()
+        languageIndex = 0
         if (routes.isEmpty()) {
             active = null
             listener.onError("No speech service works in-app", routeUnavailable = true)
@@ -133,7 +137,8 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
         }
         var ready = false
         val thisAttempt = ++attempt
-        val language = if (askForEnglish) english else "watch language"
+        val asked = languages[languageIndex]
+        val language = asked ?: "watch language"
         report("${route.label} ($language): starting")
 
         // A route that neither starts nor fails counts as not working.
@@ -185,10 +190,11 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
                 if (!ready && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && error != SpeechRecognizer.ERROR_NO_MATCH) {
                     val languageProblem = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
                         error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-                    if (languageProblem && askForEnglish) {
-                        // Same route again in the watch's own language.
-                        report("${route.label} ($english): ${SpeechInput.errorName(error)}")
-                        askForEnglish = false
+                    if (languageProblem && languageIndex < languages.lastIndex) {
+                        // Same route again in the next language: no Finnish means English from now on.
+                        report("${route.label} ($language): ${SpeechInput.errorName(error)}")
+                        if (asked == Language.FINNISH_TAG) Language.finnishHeard = false
+                        languageIndex++
                         startWith(listener)
                         return
                     }
@@ -220,7 +226,7 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
             }
         })
         sr.startListening(
-            SpeechInput.recognizeIntent(if (askForEnglish) english else null)
+            SpeechInput.recognizeIntent(asked)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         )
@@ -238,7 +244,7 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
 
     private fun tryNextRoute(listener: SpeechInput.Listener, reason: String) {
         val route = routes[routeIndex]
-        report("${route.label} (${if (askForEnglish) english else "watch language"}): $reason")
+        report("${route.label} (${languages.getOrNull(languageIndex) ?: "watch language"}): $reason")
         recognizer?.destroy()
         recognizer = null
         if (routeIndex == provenRoute) {
@@ -248,7 +254,9 @@ class InAppSpeechInput(private val context: Context) : SpeechInput {
             return
         }
         Log.d(TAG, "speech route ${route.label} unusable: $reason")
-        askForEnglish = true
+        // The next route starts from the top, without Finnish if this one turned it off.
+        languages = listOf(Language.recognitionTag(), SpeechInput.englishTag(), null).distinct()
+        languageIndex = 0
         routeIndex++
         if (routeIndex < routes.size) {
             startWith(listener)

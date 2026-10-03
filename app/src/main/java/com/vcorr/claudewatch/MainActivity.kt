@@ -333,7 +333,7 @@ class MainActivity : Activity() {
         if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
             startListening(followUp = false)
         } else {
-            goIdle("Microphone permission is needed to talk", problem = true, spoken = "I need the microphone permission to hear you.")
+            goIdle("Microphone permission is needed to talk", problem = true, spoken = Language.say("I need the microphone permission to hear you.", "Tarvitsen mikrofonin luvan, jotta kuulen sinua."))
         }
     }
 
@@ -450,7 +450,7 @@ class MainActivity : Activity() {
                     startListening(followUp, closeIfSilent)
                     return
                 }
-                goIdle(message, problem = true, spoken = "Sorry, I couldn't listen just then.")
+                goIdle(message, problem = true, spoken = Language.say("Sorry, I couldn't listen just then.", "Anteeksi, en pystynyt kuuntelemaan juuri nyt."))
             }
         })
 
@@ -489,6 +489,7 @@ class MainActivity : Activity() {
                     conversation.forRequest(),
                     key,
                     watchTools,
+                    finnish = Language.finnish,
                     onProgress = { label ->
                         scope.launch {
                             if (token != turnToken) return@launch
@@ -524,12 +525,12 @@ class MainActivity : Activity() {
                 speaker.stop()
                 conversation.dropUnanswered()
                 if (e is IOException) {
-                    goIdle("No connection to Claude", problem = true, spoken = "I can't reach Claude right now. Check the watch's connection.")
+                    goIdle("No connection to Claude", problem = true, spoken = Language.say("I can't reach Claude right now. Check the watch's connection.", "En saa yhteyttä Claudeen juuri nyt. Tarkista kellon yhteys."))
                 } else {
                     goIdle(
                         "Claude had a problem: ${e.message?.take(80) ?: "unknown error"}",
                         problem = true,
-                        spoken = "Claude had a problem. Try again in a moment.",
+                        spoken = Language.say("Claude had a problem. Try again in a moment.", "Claudella oli ongelma. Yritä hetken päästä uudelleen."),
                     )
                 }
             }
