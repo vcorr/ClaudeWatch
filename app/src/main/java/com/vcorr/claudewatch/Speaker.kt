@@ -15,8 +15,10 @@ import java.util.Locale
 
 /**
  * Speaks replies sentence by sentence with the system TTS, holding transient audio focus while it
- * talks. [speak]'s callback runs on the main thread once the last sentence has finished, or straight
- * away if TTS is unavailable.
+ * talks. A reply can be spoken whole with [speak], or as it arrives with [begin], [add] for each
+ * sentence, and [end]. The callback runs on the main thread once everything has been spoken (and,
+ * when streaming, [end] has been called), or straight away if TTS is unavailable. Call from the
+ * main thread.
  *
  * It prefers Google's engine, which is installed on Galaxy Watches beside Samsung's default, and
  * picks the best installed voice in the watch's English. While it talks it lifts a near-silent
@@ -40,9 +42,13 @@ class Speaker(context: Context) {
     private var engine: String? = null
     private var ready = false
     private var failed = false
-    private var queued: Pair<String, () -> Unit>? = null
     private var onFinished: (() -> Unit)? = null
+    // A reply is still arriving: more sentences may follow even when the queue runs dry.
+    private var streamOpen = false
+    // Sentences given before the engine was ready.
+    private val waiting = mutableListOf<String>()
     private var lastUtteranceId: String? = null
+    private var audioHeld = false
     private var counter = 0
     private var restoreVolume: Int? = null
     private var raisedTo: Int? = null
@@ -68,8 +74,10 @@ class Speaker(context: Context) {
                     start(null)
                 } else if (status == TextToSpeech.SUCCESS) {
                     ready = true
-                    queued?.let { (text, done) -> speak(text, done) }
-                    queued = null
+                    val pending = waiting.toList()
+                    waiting.clear()
+                    pending.forEach(::add)
+                    finishIfIdle()
                 } else if (enginePackage != null) {
                     // Google's engine wouldn't start: fall back to the watch's default.
                     created?.shutdown()
@@ -77,8 +85,8 @@ class Speaker(context: Context) {
                 } else {
                     failed = true
                     description = "unavailable"
-                    queued?.second?.invoke()
-                    queued = null
+                    waiting.clear()
+                    finishIfIdle()
                 }
             }
         }, enginePackage)
@@ -129,39 +137,47 @@ class Speaker(context: Context) {
             .firstOrNull()
     }
 
+    /** Speaks a whole reply. */
     fun speak(text: String, onDone: () -> Unit) {
+        begin(onDone)
+        SpokenText.sentences(text).forEach(::add)
+        end()
+    }
+
+    /** Starts speaking a reply that is still arriving, stopping anything already being said. */
+    fun begin(onDone: () -> Unit) {
         stop()
-        if (failed) {
-            main.post(onDone)
-            return
-        }
+        onFinished = onDone
+        streamOpen = true
+    }
+
+    /** Queues one sentence of the reply begun with [begin]. */
+    fun add(sentence: String) {
+        if (onFinished == null || sentence.isBlank() || failed) return
         val tts = tts
         if (!ready || tts == null) {
-            queued = text to onDone
+            waiting += sentence
             return
         }
-        val sentences = SpokenText.sentences(text).filter { it.isNotBlank() }
-        if (sentences.isEmpty()) {
-            main.post(onDone)
-            return
-        }
-        onFinished = onDone
-        audioManager.requestAudioFocus(focusRequest)
-        raiseQuietVolume()
-        val base = "u${++counter}"
-        sentences.forEachIndexed { i, sentence ->
-            tts.speak(sentence, TextToSpeech.QUEUE_ADD, null, "$base-$i")
-        }
-        lastUtteranceId = "$base-${sentences.lastIndex}"
+        holdAudio()
+        val id = "u${++counter}"
+        tts.speak(sentence, TextToSpeech.QUEUE_ADD, null, id)
+        lastUtteranceId = id
+    }
+
+    /** The reply is complete: [begin]'s callback runs once the last sentence has been spoken. */
+    fun end() {
+        streamOpen = false
+        finishIfIdle()
     }
 
     fun stop() {
-        queued = null
         onFinished = null
+        streamOpen = false
+        waiting.clear()
         lastUtteranceId = null
         if (ready) tts?.stop()
-        audioManager.abandonAudioFocusRequest(focusRequest)
-        restoreQuietVolume()
+        releaseAudio()
     }
 
     fun shutdown() {
@@ -174,12 +190,31 @@ class Speaker(context: Context) {
         main.post {
             if (utteranceId == null || utteranceId != lastUtteranceId) return@post
             lastUtteranceId = null
-            audioManager.abandonAudioFocusRequest(focusRequest)
-            restoreQuietVolume()
-            val done = onFinished
-            onFinished = null
-            done?.invoke()
+            finishIfIdle()
         }
+    }
+
+    /** Runs the callback once nothing is being said, waiting or still to come. */
+    private fun finishIfIdle() {
+        if (streamOpen || lastUtteranceId != null || (waiting.isNotEmpty() && !failed)) return
+        val done = onFinished ?: return
+        onFinished = null
+        releaseAudio()
+        main.post(done)
+    }
+
+    private fun holdAudio() {
+        if (audioHeld) return
+        audioHeld = true
+        audioManager.requestAudioFocus(focusRequest)
+        raiseQuietVolume()
+    }
+
+    private fun releaseAudio() {
+        if (!audioHeld) return
+        audioHeld = false
+        audioManager.abandonAudioFocusRequest(focusRequest)
+        restoreQuietVolume()
     }
 
     /** A reply nobody can hear is no reply: lift a low (but not muted) media volume while speaking. */

@@ -452,18 +452,24 @@ class MainActivity : Activity() {
                 showSetup(null)
                 return@launch
             }
+            val live = LiveReply(token, text)
             try {
-                val reply = ClaudeApi.reply(conversation.forRequest(), key, watchTools) { label ->
-                    runOnUiThread { if (token == turnToken && state == State.THINKING) tvStatus.text = label }
-                }
+                val reply = ClaudeApi.reply(
+                    conversation.forRequest(),
+                    key,
+                    watchTools,
+                    onProgress = { label ->
+                        runOnUiThread { if (token == turnToken && state == State.THINKING) tvStatus.text = label }
+                    },
+                    onText = { delta -> runOnUiThread { live.add(delta) } },
+                )
                 if (token != turnToken) return@launch
                 conversation.addAssistant(reply.text)
                 saveChat()
                 shownQuestion = text
                 shownReply = reply.text
                 tvReply.text = reply.display
-                scrollReply.scrollTo(0, 0)
-                speak(reply.text, token)
+                live.finish(reply)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: InvalidApiKeyException) {
@@ -485,21 +491,77 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Speaks a reply that is already complete. */
     private fun speak(reply: String, token: Int) {
         state = State.SPEAKING
+        scrollReply.scrollTo(0, 0)
         render()
         buzz(VibrationEffect.EFFECT_DOUBLE_CLICK)
-        speaker.speak(SpokenText.clean(reply)) {
-            if (token != turnToken) return@speak
-            if (!foreground) {
-                goIdle(null)
-                return@speak
+        speaker.speak(SpokenText.clean(reply)) { onSpoken(token) }
+    }
+
+    /** The reply has been said: listen for a follow-up, if the wearer is still here. */
+    private fun onSpoken(token: Int) {
+        if (token != turnToken) return
+        if (!foreground) {
+            goIdle(null)
+            return
+        }
+        // A short pause, so the microphone doesn't catch the tail of the reply.
+        scope.launch {
+            delay(MIC_DELAY_MS)
+            if (token == turnToken && foreground) startListening(followUp = true)
+        }
+    }
+
+    /**
+     * A reply arriving as a stream: each sentence is spoken as soon as it is complete, and the text
+     * grows on screen, so the wearer hears the start of the answer while the rest is on its way.
+     * Call on the main thread.
+     */
+    private inner class LiveReply(private val token: Int, private val question: String) {
+        private val text = StringBuilder()
+        private var spokenUpTo = 0
+        private var started = false
+
+        fun add(delta: String) {
+            if (token != turnToken) return
+            text.append(delta)
+            val complete = SpokenText.completeLength(text.toString())
+            if (complete > spokenUpTo) {
+                say(text.substring(spokenUpTo, complete))
+                spokenUpTo = complete
             }
-            // A short pause, so the microphone doesn't catch the tail of the reply.
-            scope.launch {
-                delay(MIC_DELAY_MS)
-                if (token == turnToken && foreground) startListening(followUp = true)
+            if (started) tvReply.text = text.toString()
+        }
+
+        /** The whole reply is in: say what is left, or the reply itself if nothing was said yet. */
+        fun finish(reply: Reply) {
+            if (reply.refused || !started) {
+                speak(reply.text, token)
+                return
             }
+            // The last sentence has nothing after it, so it was never counted as complete.
+            if (!reply.truncated) say(text.substring(spokenUpTo))
+            speaker.end()
+        }
+
+        private fun say(chunk: String) {
+            val sentences = SpokenText.sentences(SpokenText.clean(chunk))
+            if (sentences.isEmpty()) return
+            if (!started) begin()
+            sentences.forEach(speaker::add)
+        }
+
+        private fun begin() {
+            started = true
+            shownQuestion = question
+            state = State.SPEAKING
+            tvReply.text = text.toString()
+            scrollReply.scrollTo(0, 0)
+            render()
+            buzz(VibrationEffect.EFFECT_DOUBLE_CLICK)
+            speaker.begin { onSpoken(token) }
         }
     }
 

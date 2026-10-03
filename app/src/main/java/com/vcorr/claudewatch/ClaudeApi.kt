@@ -6,6 +6,8 @@ import com.vcorr.claudewatch.core.SpokenText
 import com.vcorr.claudewatch.core.Turn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -52,18 +54,22 @@ object ClaudeApi {
      * Sends the conversation and returns Claude's reply, ready to show and speak. When Claude asks
      * for a watch tool, it runs here and the answer goes back, until Claude replies in words.
      * [onProgress] hears what the watch is doing meanwhile, such as "Checking the weather".
+     * [onText] hears Claude's words as they stream in, on a background thread, so speaking can
+     * start before the reply is complete; it hears every text block, including any said before a
+     * tool call ("Let me check").
      */
     suspend fun reply(
         history: List<Turn>,
         apiKey: String,
         tools: WatchTools?,
         onProgress: (String) -> Unit = {},
+        onText: (String) -> Unit = {},
     ): Reply = withContext(Dispatchers.IO) {
         try {
-            converse(history, apiKey, tools, withSearch = tools != null, onProgress)
+            converse(history, apiKey, tools, withSearch = tools != null, onProgress, onText)
         } catch (e: SearchUnavailableException) {
             // If this account or model can't use web search, answer without it rather than fail.
-            converse(history, apiKey, tools, withSearch = false, onProgress)
+            converse(history, apiKey, tools, withSearch = false, onProgress, onText)
         }
     }
 
@@ -73,6 +79,7 @@ object ClaudeApi {
         tools: WatchTools?,
         withSearch: Boolean,
         onProgress: (String) -> Unit,
+        onText: (String) -> Unit,
     ): Reply {
         val messages = JSONArray()
         history.forEach { turn ->
@@ -99,7 +106,7 @@ object ClaudeApi {
 
         val used = mutableSetOf<String>()
         repeat(MAX_ROUNDS) {
-            val json = post(messages, toolList, apiKey, withSearch)
+            val json = post(messages, toolList, apiKey, withSearch, onText)
             val stopReason = json.optString("stop_reason")
             val content = json.getJSONArray("content")
             when (stopReason) {
@@ -132,15 +139,27 @@ object ClaudeApi {
                 else -> return finish(json, used)
             }
         }
-        return Reply("Sorry, that took too many steps. Could you ask it more simply?", emptyList())
+        return Reply("Sorry, that took too many steps. Could you ask it more simply?", emptyList(), refused = true)
     }
 
-    private fun post(messages: JSONArray, tools: JSONArray, apiKey: String, withSearch: Boolean): JSONObject {
+    /**
+     * One streamed request. Text is passed to [onText] as it arrives, and the events are put back
+     * together into the same message the API would return unstreamed (content blocks, stop reason,
+     * usage), so the tool loop can send Claude's turn back exactly as it came.
+     */
+    private suspend fun post(
+        messages: JSONArray,
+        tools: JSONArray,
+        apiKey: String,
+        withSearch: Boolean,
+        onText: (String) -> Unit,
+    ): JSONObject {
         val body = JSONObject()
             .put("model", MODEL)
             .put("max_tokens", MAX_TOKENS)
             .put("system", "$SYSTEM_PROMPT ${now()}")
             .put("messages", messages)
+            .put("stream", true)
         if (tools.length() > 0) body.put("tools", tools)
 
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
@@ -150,24 +169,80 @@ object ClaudeApi {
             setRequestProperty("anthropic-version", "2023-06-01")
             doOutput = true
             connectTimeout = 15_000
-            // Searching adds a few seconds or more.
+            // Between streamed events; a search can leave a gap of several seconds.
             readTimeout = 60_000
         }
-        OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+        try {
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
 
-        if (conn.responseCode == 401) throw InvalidApiKeyException()
-        if (conn.responseCode != 200) {
-            val err = conn.errorStream?.bufferedReader()?.readText() ?: "HTTP ${conn.responseCode}"
-            val message = errorMessage(err, conn.responseCode)
-            if (withSearch && conn.responseCode == 400 && message.contains("web_search")) throw SearchUnavailableException()
-            error(message)
+            if (conn.responseCode == 401) throw InvalidApiKeyException()
+            if (conn.responseCode != 200) {
+                val err = conn.errorStream?.bufferedReader()?.readText() ?: "HTTP ${conn.responseCode}"
+                val message = errorMessage(err, conn.responseCode)
+                if (withSearch && conn.responseCode == 400 && message.contains("web_search")) throw SearchUnavailableException()
+                error(message)
+            }
+
+            val blocks = sortedMapOf<Int, JSONObject>()
+            val inputs = mutableMapOf<Int, StringBuilder>()
+            var stopReason = ""
+            var usage = JSONObject()
+            val reader = conn.inputStream.bufferedReader()
+            while (true) {
+                // Stop reading, and drop the connection, as soon as the wearer interrupts.
+                currentCoroutineContext().ensureActive()
+                val line = reader.readLine() ?: break
+                if (!line.startsWith("data:")) continue
+                val event = JSONObject(line.removePrefix("data:").trim())
+                when (event.optString("type")) {
+                    "content_block_start" -> {
+                        val index = event.getInt("index")
+                        val block = event.getJSONObject("content_block")
+                        blocks[index] = block
+                        // A tool call's input arrives as pieces of JSON, put together at the block's end.
+                        if (block.optString("type").endsWith("tool_use")) inputs[index] = StringBuilder()
+                    }
+                    "content_block_delta" -> {
+                        val index = event.getInt("index")
+                        val block = blocks[index] ?: continue
+                        val delta = event.getJSONObject("delta")
+                        when (delta.optString("type")) {
+                            "text_delta" -> {
+                                val text = delta.optString("text")
+                                block.put("text", block.optString("text") + text)
+                                if (text.isNotEmpty()) onText(text)
+                            }
+                            "input_json_delta" -> inputs[index]?.append(delta.optString("partial_json"))
+                            "citations_delta" -> {
+                                val citations = block.optJSONArray("citations") ?: JSONArray().also { block.put("citations", it) }
+                                delta.optJSONObject("citation")?.let { citations.put(it) }
+                            }
+                        }
+                    }
+                    "content_block_stop" -> {
+                        val index = event.getInt("index")
+                        val input = inputs.remove(index)?.toString()
+                        if (input != null) blocks[index]?.put("input", if (input.isBlank()) JSONObject() else JSONObject(input))
+                    }
+                    "message_delta" -> {
+                        event.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { stopReason = it }
+                        event.optJSONObject("usage")?.let { usage = it }
+                    }
+                    "error" -> error(event.optJSONObject("error")?.optString("message") ?: "The reply stream failed")
+                }
+            }
+            return JSONObject()
+                .put("content", JSONArray(blocks.values.toList()))
+                .put("stop_reason", stopReason)
+                .put("usage", usage)
+        } finally {
+            conn.disconnect()
         }
-        return JSONObject(conn.inputStream.bufferedReader().readText())
     }
 
     private fun finish(json: JSONObject, used: Set<String>): Reply {
         val stopReason = json.optString("stop_reason")
-        if (stopReason == "refusal") return Reply("Sorry, I can't help with that one.", emptyList())
+        if (stopReason == "refusal") return Reply("Sorry, I can't help with that one.", emptyList(), refused = true)
 
         // With search, the reply is the text after the last search result; earlier text is Claude
         // narrating the search ("I'll look that up"). A response may also begin with a non-text block.
@@ -192,7 +267,7 @@ object ClaudeApi {
         val searches = json.optJSONObject("usage")?.optJSONObject("server_tool_use")?.optInt("web_search_requests") ?: 0
         // Counts and tool names only, never content.
         Log.d(TAG, "reply chars=${result.length} stop=$stopReason searches=$searches tools=$used")
-        return Reply(result, sources)
+        return Reply(result, sources, truncated = stopReason == "max_tokens")
     }
 
     /** Today's date and time where the wearer is, which Claude can't otherwise know. */
@@ -208,8 +283,17 @@ object ClaudeApi {
     }
 }
 
-/** Claude's reply, and the websites it cited, if it searched. */
-data class Reply(val text: String, val sources: List<String>) {
+/**
+ * Claude's reply, and the websites it cited, if it searched. [refused] means the text is ours, not
+ * what was streamed (a refusal, or too many tool rounds); [truncated] means Claude was cut off at
+ * the token limit and [text] ends at the last whole sentence.
+ */
+data class Reply(
+    val text: String,
+    val sources: List<String>,
+    val refused: Boolean = false,
+    val truncated: Boolean = false,
+) {
 
     /** The reply as shown on screen: the text, then where it came from. */
     val display: String
