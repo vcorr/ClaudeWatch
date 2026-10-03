@@ -11,7 +11,7 @@ Survey taken on 1 October 2026 before refreshing the project. Sources are linked
 | Kotlin | 1.9.25 via `kotlin-android` plugin | 2.4.20 via AGP's built-in Kotlin | [Migrate to built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin), [AGP 9.0 notes](https://developer.android.com/build/releases/agp-9-0-0-release-notes#runtime-dependency-on-kotlin-gradle-plugin) |
 | kotlinx-coroutines | 1.7.3 | 1.11.0 | Maven Central metadata |
 | androidx.wear:wear | 1.3.0 | 1.4.0 (25 Feb 2026) | [Wear release notes](https://developer.android.com/jetpack/androidx/releases/wear) |
-| androidx.appcompat | 1.7.0 | 1.8.0 (12 Aug 2026) | [AppCompat release notes](https://developer.android.com/jetpack/androidx/releases/appcompat) |
+| androidx.appcompat | 1.7.0 | removed (unused) | [AppCompat release notes](https://developer.android.com/jetpack/androidx/releases/appcompat) |
 | compileSdk / targetSdk | 35 / 34 | 36 / 36 | see Play requirement below |
 
 **Google Play target API rule** (from 31 Aug 2026): new apps and updates must target API 36, *except* Wear OS, which must target API 35 or higher. ([Play Console Help](https://support.google.com/googleplay/android-developer/answer/11926878))
@@ -50,4 +50,4 @@ A separate cluster uses the watch to **remote-control Claude Code** rather than 
 
 1. Can a third-party app be chosen as the default assistant on a Galaxy Watch and be launched by holding the button? This can only be tested on the device.
 2. System speech recognition (`RecognizerIntent`) or offline Vosk? Vosk adds about 68 MB (ClawWatch's figure) but works without a connection.
-3. Where should the API key live? Compiled in (as now), pushed over ADB, entered on the phone and synced, or held behind a small proxy?
+3. Where should the API key live? *Answered:* in a private file on the watch, entered once from the phone's browser through a PIN-protected page the watch serves on the local Wi-Fi (or pushed over adb); never compiled in.

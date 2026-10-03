@@ -2,7 +2,7 @@
 
 Read on 1 October 2026 from [ThinkOffApp/ClawWatch](https://github.com/ThinkOffApp/ClawWatch) at commit `926fbd8` (13 Sep 2026). AGPL-3.0: these are notes on ideas. No code was copied.
 
-Our goal is narrower than theirs: **a Claude voice chat on the watch, for when the phone and computer are out of reach.** No agent, avatars, health data or chat rooms.
+Our goal is narrower than theirs: **a Claude voice chat on the watch, for when the phone and computer are out of reach.** No agent, avatars, health data or chat rooms. (Since 3 Oct 2026, by the owner's choice, Claude can read a live heart rate and today's steps when asked; still no health history.)
 
 ## How much of it is relevant
 

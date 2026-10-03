@@ -4,11 +4,20 @@ on:
   push:
     branches:
       - '**'
-  pull_request:
+
+# The repository is public: the workflow only needs to read the code.
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes a build still running.
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -22,12 +31,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Set ANDROID_HOME
-        run: echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
 
       - name: Work out the version
         run: echo "VERSION=$(grep '^claudewatch.version=' gradle.properties | cut -d= -f2).${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV

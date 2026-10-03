@@ -14,7 +14,7 @@ kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", v
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-wear = { module = "androidx.wear:wear", version.ref = "wear" }
 androidx-health-services = { module = "androidx.health:health-services-client", version.ref = "healthServices" }
-# Health Services returns ListenableFuture without exposing it; this is the class alone, not all of Guava.
+# Health Services and Tiles return ListenableFuture without exposing it; this is the class alone, not all of Guava.
 guava-listenablefuture = { module = "com.google.guava:listenablefuture", version.ref = "listenableFuture" }
 androidx-wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "tiles" }
 androidx-wear-protolayout = { module = "androidx.wear.protolayout:protolayout", version.ref = "protolayout" }
