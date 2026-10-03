@@ -44,5 +44,6 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.wear)
     implementation(libs.androidx.health.services)
+    implementation(libs.guava.listenablefuture)
     implementation(libs.kotlinx.coroutines.android)
 }
