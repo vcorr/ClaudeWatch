@@ -9,6 +9,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
@@ -52,6 +53,7 @@ class ProbeActivity : Activity() {
         findViewById<Button>(R.id.btn_probe_routes).setOnClickListener { testRoutes() }
         findViewById<Button>(R.id.btn_probe_dialog).setOnClickListener { testSystemDialog() }
         findViewById<Button>(R.id.btn_probe_speak).setOnClickListener { testSpeech() }
+        findViewById<Button>(R.id.btn_probe_notifications).setOnClickListener { notificationAccess() }
 
         if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
             runChecks()
@@ -110,6 +112,9 @@ class ProbeActivity : Activity() {
             log("Default engine: ${engine.defaultEngine}")
             engine.engines.forEach { info -> describeEngine(info.name, info.label) }
         }
+
+        log("— Notifications —")
+        log(notificationAccessLine())
 
         log("— Claude round trip —")
         scope.launch {
@@ -316,6 +321,30 @@ class ProbeActivity : Activity() {
                 log("Conversation: ${if (Language.finnish) "Finnish" else "English"} (Finnish voice ${yesNo(Language.finnishSpoken)}, Finnish listening ${yesNo(Language.finnishHeard)})")
             }
         }
+    }
+
+    private fun notificationAccessLine(): String = if (NotificationsService.granted(this)) {
+        "Notification access: granted"
+    } else {
+        "Notification access: off. To allow it, run this once in Bugjaeger's shell (or adb shell):\n" +
+            NotificationsService.grantCommand(this)
+    }
+
+    /** Opens the system's notification-access page for the app if the watch has one, else says how to grant it. */
+    private fun notificationAccess() {
+        if (NotificationsService.granted(this)) {
+            log("Notification access: granted")
+            return
+        }
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+            .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, NotificationsService.component(this).flattenToString())
+        try {
+            startActivity(intent)
+            log("Opened the watch's notification-access page. If it has no switch for ClaudeWatch, use the command:")
+        } catch (e: ActivityNotFoundException) {
+            log("This watch has no notification-access page, so use the command:")
+        }
+        log(NotificationsService.grantCommand(this))
     }
 
     // ── Helpers ─────────────────────────────────────────────

@@ -119,6 +119,8 @@ class WatchTools(private val context: Context) {
                 required = listOf("action"),
             )
         )
+        .put(tool("get_notifications", "The notifications on the watch now, newest first: app, time, title and text, and the last few messages of a conversation. Use only when the wearer asks about their notifications or messages."))
+        .put(tool("get_now_playing", "What is playing on the watch or through it now: the app, title, artist and whether it is playing or paused."))
         .put(tool("get_air_pressure", "Air pressure from the watch's barometer, with the sea-level pressure here now, three hours ago and three hours ahead (a falling trend often means worsening weather), and the watch's altitude estimated from the two."))
         .put(tool("get_compass", "Which way the watch's 12 o'clock edge points, as a compass bearing, read while the wearer holds the watch flat. Useful with recall's directions to a saved place."))
         .put(
@@ -162,6 +164,8 @@ class WatchTools(private val context: Context) {
         "set_timer" -> "Setting a timer"
         "set_alarm" -> "Setting an alarm"
         "control_media" -> "Pressing the buttons"
+        "get_notifications" -> "Reading your notifications"
+        "get_now_playing" -> "Seeing what's playing"
         "get_air_pressure" -> "Reading the barometer"
         "get_compass" -> "Hold the watch flat"
         "remember" -> "Making a note"
@@ -181,6 +185,8 @@ class WatchTools(private val context: Context) {
         "set_timer" -> setTimer(input.optInt("seconds"), input.optString("label").takeIf { it.isNotBlank() })
         "set_alarm" -> setAlarm(input.optInt("hour", -1), input.optInt("minute", -1), input.optString("label").takeIf { it.isNotBlank() })
         "control_media" -> media(input.optString("action"), input.optInt("level", -1))
+        "get_notifications" -> NotificationsService.describeActive(context) ?: throw notificationAccessOff()
+        "get_now_playing" -> NotificationsService.describeNowPlaying(context) ?: throw notificationAccessOff()
         "get_air_pressure" -> airPressure()
         "get_compass" -> compass()
         "remember" -> remember(input.optString("text").trim(), input.optBoolean("at_current_location"))
@@ -538,13 +544,30 @@ class WatchTools(private val context: Context) {
             }
             else -> throw ToolException("Unknown media action $action.")
         }
-        // A press is a key going down and coming up; it reaches the app that last played.
+        // With notification access, steer the active player directly and say which it is.
+        NotificationsService.mediaController(context)?.let { player ->
+            val controls = player.transportControls
+            when (key) {
+                KeyEvent.KEYCODE_MEDIA_PLAY -> controls.play()
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> controls.pause()
+                KeyEvent.KEYCODE_MEDIA_NEXT -> controls.skipToNext()
+                else -> controls.skipToPrevious()
+            }
+            delay(MEDIA_SETTLE_MS)
+            return "Sent $action. " + (NotificationsService.describeNowPlaying(context) ?: "")
+        }
+        // Otherwise a press is a key going down and coming up; it reaches the app that last played.
         val now = SystemClock.uptimeMillis()
         audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
         audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
         return "Sent $action to the media player that last played on the watch. " +
             "If nothing has played since the watch started, nothing will respond."
     }
+
+    private fun notificationAccessOff() = ToolException(
+        "Notification access is off for ClaudeWatch. It is granted once, from a phone or computer over ADB; " +
+            "ClaudeWatch's diagnostics (a long press on the microphone) show how."
+    )
 
     private fun percent(value: Int, max: Int) = if (max == 0) 0 else (value * 100 + max / 2) / max
 
@@ -761,6 +784,7 @@ class WatchTools(private val context: Context) {
         private const val STEPS_FLUSH_WAIT_MS = 1_500L
         private const val SENSOR_TIMEOUT_MS = 3_000L
         private const val COMPASS_SETTLE_MS = 800L
+        private const val MEDIA_SETTLE_MS = 700L
         private const val RECENT_LOCATION_MS = 30 * 60 * 1000L
         private const val MAX_EVENTS = 15
         private const val HTTP_CONNECT_TIMEOUT_MS = 10_000

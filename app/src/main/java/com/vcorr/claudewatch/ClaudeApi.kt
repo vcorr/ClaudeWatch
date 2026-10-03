@@ -37,7 +37,8 @@ object ClaudeApi {
             "follow-up question. You have tools that read the watch: its location, the weather, its " +
             "battery and alarms, the wearer's heart rate, their activity today, their calendar, the " +
             "barometer and the compass. Others act: setting timers and alarms in the Clock app, " +
-            "controlling music and the volume, and keeping notes the wearer asks you to remember, " +
+            "controlling music and the volume, reading the watch's notifications (only when the wearer " +
+            "asks about them), and keeping notes the wearer asks you to remember, " +
             "including places such as where they parked. Use one when the question " +
             "needs it, then give the answer itself rather than describing the tool. When you have set " +
             "a timer or alarm, say plainly what you set. Use web search only " +
