@@ -42,6 +42,8 @@ class ProbeActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_probe)
+        // The tests need the wearer to watch and speak; don't let the screen time out under them.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         scroll = findViewById(R.id.probe_scroll)
         tvLog = findViewById(R.id.tv_probe_log)
 
