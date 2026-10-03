@@ -45,5 +45,8 @@ dependencies {
     implementation(libs.androidx.wear)
     implementation(libs.androidx.health.services)
     implementation(libs.guava.listenablefuture)
+    implementation(libs.androidx.wear.tiles)
+    implementation(libs.androidx.wear.protolayout)
+    implementation(libs.androidx.concurrent.futures)
     implementation(libs.kotlinx.coroutines.android)
 }

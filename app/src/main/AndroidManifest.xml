@@ -51,6 +51,20 @@
             android:name=".ProbeActivity"
             android:exported="false" />
 
+        <!-- The Talk tile beside the watch face; only the system may bind to it. -->
+        <service
+            android:name=".TalkTileService"
+            android:exported="true"
+            android:label="Claude"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/clawd" />
+        </service>
+
         <!-- Only Health Services may bind: it delivers the daily step count here. -->
         <service
             android:name=".StepsService"
