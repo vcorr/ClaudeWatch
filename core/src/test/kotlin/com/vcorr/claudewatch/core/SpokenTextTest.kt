@@ -74,4 +74,16 @@ class SpokenTextTest {
             SpokenText.sentences(SpokenText.clean(text.substring(0, SpokenText.completeLength(text)))),
         )
     }
+
+    @Test
+    fun aNumberEndsASentenceMidLine() {
+        val text = "The answer is 4. Anything else?"
+        assertEquals("The answer is 4.".length, SpokenText.completeLength(text))
+    }
+
+    @Test
+    fun cleanLeavesAMidLineNumberAlone() {
+        assertEquals("42. That is the answer.", SpokenText.clean(" 42. That is the answer.", atLineStart = false))
+        assertEquals("That is the answer.", SpokenText.clean("42. That is the answer."))
+    }
 }

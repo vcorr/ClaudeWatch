@@ -5,6 +5,7 @@ import com.vcorr.claudewatch.core.Role
 import com.vcorr.claudewatch.core.SpokenText
 import com.vcorr.claudewatch.core.Turn
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -38,7 +39,7 @@ object ClaudeApi {
             "markdown, lists, headings, code blocks, emoji or URLs. Keep replies short, usually one to " +
             "three sentences, unless they ask for more detail. If a request is unclear, ask a brief " +
             "follow-up question. You have tools that read the watch: its location, the weather, its " +
-            "battery and alarms, the wearer's heart rate and their calendar. Use one when the question " +
+            "battery and alarms, the wearer's heart rate, their step count today and their calendar. Use one when the question " +
             "needs it, then give the answer itself rather than describing the tool. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
@@ -179,7 +180,7 @@ object ClaudeApi {
             readTimeout = 60_000
         }
         // A blocked read doesn't notice cancellation; dropping the connection ends it at once.
-        val hangUp = launch {
+        val hangUp = launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {
@@ -256,6 +257,10 @@ object ClaudeApi {
                 .put("content", JSONArray(blocks.values.toList()))
                 .put("stop_reason", stopReason)
                 .put("usage", usage)
+        } catch (e: IOException) {
+            // Hanging up on a cancelled request breaks the read; that is a cancellation, not a fault.
+            currentCoroutineContext().ensureActive()
+            throw e
         } finally {
             hangUp.cancel()
             conn.disconnect()

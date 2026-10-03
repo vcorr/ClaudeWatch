@@ -194,6 +194,8 @@ class Speaker(context: Context) {
         main.post {
             if (utteranceId == null || utteranceId != lastUtteranceId) return@post
             lastUtteranceId = null
+            // Waiting for more of a reply (a tool may be running): don't hold the music down meanwhile.
+            if (streamOpen) releaseAudio()
             finishIfIdle()
         }
     }

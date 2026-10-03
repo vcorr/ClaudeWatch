@@ -40,15 +40,30 @@ class StepsService : PassiveListenerService() {
          * reboot, so this runs on every launch; repeating it is harmless.
          */
         fun register(context: Context) {
-            if (context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) return
+            val app = context.applicationContext
+            if (app.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) return
             try {
                 val config = PassiveListenerConfig.builder()
                     .setDataTypes(setOf(DataType.STEPS_DAILY))
                     .build()
-                HealthServices.getClient(context).passiveMonitoringClient
+                val result = HealthServices.getClient(app).passiveMonitoringClient
                     .setPassiveListenerServiceAsync(StepsService::class.java, config)
+                // A watch that can't supply daily steps refuses here; note it rather than fail silently.
+                result.addListener(
+                    { runCatching { result.get() }.onFailure { Log.d(TAG, "steps registration refused: ${it.javaClass.simpleName}") } },
+                    app.mainExecutor,
+                )
             } catch (e: Exception) {
                 Log.d(TAG, "steps registration failed: ${e.javaClass.simpleName}")
+            }
+        }
+
+        /** Asks Health Services to deliver any steps it is holding back, rather than at the next batch. */
+        fun flush(context: Context) {
+            try {
+                HealthServices.getClient(context.applicationContext).passiveMonitoringClient.flushAsync()
+            } catch (e: Exception) {
+                Log.d(TAG, "steps flush failed: ${e.javaClass.simpleName}")
             }
         }
     }

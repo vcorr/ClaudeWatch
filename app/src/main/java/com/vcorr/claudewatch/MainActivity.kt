@@ -85,6 +85,10 @@ class MainActivity : Activity() {
     private var shownQuestion = ""
     private var shownReply: String? = null
 
+    // What the watch is doing for Claude ("Checking the weather"), shown while thinking and while
+    // a tool runs after Claude has said it will look something up.
+    private var toolLabel: String? = null
+
     // Set while the in-app follow-up window is counting down, so its ring is shown.
     private var followUpTimed = false
 
@@ -446,6 +450,8 @@ class MainActivity : Activity() {
     private fun ask(text: String) {
         val token = turnToken
         cancelClose()
+        liveReply = null
+        toolLabel = null
         conversation.addUser(text)
         state = State.THINKING
         pendingQuestion = text
@@ -465,12 +471,19 @@ class MainActivity : Activity() {
                     key,
                     watchTools,
                     onProgress = { label ->
-                        runOnUiThread { if (token == turnToken && state == State.THINKING) tvStatus.text = label }
+                        scope.launch {
+                            if (token != turnToken) return@launch
+                            toolLabel = label.takeIf { it != "Thinking" }
+                            render()
+                        }
                     },
-                    onText = { delta -> runOnUiThread { live.add(delta) } },
+                    // Through the same queue the reply itself returns on, so no words arrive after it.
+                    onText = { delta -> scope.launch { live.add(delta) } },
                 )
                 if (token != turnToken) return@launch
                 live.complete = true
+                liveReply = null
+                toolLabel = null
                 conversation.addAssistant(reply.text)
                 saveChat()
                 shownQuestion = text
@@ -480,12 +493,15 @@ class MainActivity : Activity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: InvalidApiKeyException) {
+                liveReply = null
                 speaker.stop()
                 conversation.dropUnanswered()
                 showSetup("The API key was rejected.")
             } catch (e: Exception) {
                 if (token != turnToken) return@launch
                 // Stop anything half-said, even when the error can't be spoken (screen off).
+                liveReply = null
+                toolLabel = null
                 speaker.stop()
                 conversation.dropUnanswered()
                 if (e is IOException) {
@@ -542,7 +558,7 @@ class MainActivity : Activity() {
          * follow-up ("and tomorrow?") still has its context. Nothing is kept if nothing was said.
          */
         fun keepHeard() {
-            if (complete || !started) return
+            if (complete || !started || token != turnToken) return
             complete = true
             val heard = text.substring(0, spokenUpTo).trim()
             if (heard.isEmpty()) return
@@ -553,14 +569,14 @@ class MainActivity : Activity() {
         }
 
         fun add(delta: String) {
-            if (token != turnToken) return
+            if (token != turnToken || complete) return
             text.append(delta)
             val complete = SpokenText.completeLength(text.toString())
             if (complete > spokenUpTo) {
-                say(text.substring(spokenUpTo, complete))
+                say(text.substring(spokenUpTo, complete), atLineStart = spokenUpTo == 0)
                 spokenUpTo = complete
             }
-            if (started) tvReply.text = text.toString()
+            if (started) tvReply.text = text.toString().trimStart()
         }
 
         /** The whole reply is in: say what is left, or the reply itself if nothing was said yet. */
@@ -570,12 +586,13 @@ class MainActivity : Activity() {
                 return
             }
             // The last sentence has nothing after it, so it was never counted as complete.
-            if (!reply.truncated) say(text.substring(spokenUpTo))
+            if (!reply.truncated) say(text.substring(spokenUpTo), atLineStart = spokenUpTo == 0)
             speaker.end()
         }
 
-        private fun say(chunk: String) {
-            val sentences = SpokenText.sentences(SpokenText.clean(chunk))
+        // A chunk after the first starts mid-line, so a number at its start is not a list marker.
+        private fun say(chunk: String, atLineStart: Boolean) {
+            val sentences = SpokenText.sentences(SpokenText.clean(chunk, atLineStart))
             if (sentences.isEmpty()) return
             if (!started) begin()
             sentences.forEach(speaker::add)
@@ -585,7 +602,7 @@ class MainActivity : Activity() {
             started = true
             shownQuestion = question
             state = State.SPEAKING
-            tvReply.text = text.toString()
+            tvReply.text = text.toString().trimStart()
             scrollReply.scrollTo(0, 0)
             render()
             buzz(VibrationEffect.EFFECT_DOUBLE_CLICK)
@@ -695,8 +712,11 @@ class MainActivity : Activity() {
         val readingReply = state == State.IDLE && !problem && idleMessage == null && reply != null
 
         ivClawd.show((state == State.IDLE && !problem && !readingReply) || state == State.THINKING)
-        tvStatus.show(state == State.LISTENING || state == State.THINKING)
-        tvStatus.text = if (state == State.THINKING) "Thinking" else "Listening"
+        tvStatus.show(state == State.LISTENING || state == State.THINKING || (state == State.SPEAKING && toolLabel != null))
+        tvStatus.text = when (state) {
+            State.LISTENING -> "Listening"
+            else -> toolLabel ?: "Thinking"
+        }
 
         tvLead.show(state == State.SPEAKING || state == State.FOLLOW_UP || readingReply)
         if (state == State.FOLLOW_UP && reply != null) {

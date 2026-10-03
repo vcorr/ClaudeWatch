@@ -21,6 +21,7 @@ import android.os.Build
 import android.os.CancellationSignal
 import android.provider.CalendarContract
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -276,11 +277,18 @@ class WatchTools(private val context: Context) {
 
     // ── Steps ───────────────────────────────────────────────
 
-    private fun steps(): String {
+    private suspend fun steps(): String {
         if (!granted(Manifest.permission.ACTIVITY_RECOGNITION)) {
             throw ToolException("Physical activity permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
         }
         val prefs = context.getSharedPreferences(StepsService.PREFS, Context.MODE_PRIVATE)
+        // Steps arrive in batches, so ask for the latest and give it a moment to land.
+        val before = prefs.getLong(StepsService.KEY_AT, 0)
+        StepsService.register(context)
+        StepsService.flush(context)
+        withTimeoutOrNull(STEPS_FLUSH_WAIT_MS) {
+            while (prefs.getLong(StepsService.KEY_AT, 0) == before) delay(250)
+        }
         val at = prefs.getLong(StepsService.KEY_AT, 0)
         if (at == 0L) {
             throw ToolException("No step count has arrived yet. The watch sends steps in batches, so the first may take a while after the app is set up.")
@@ -290,7 +298,9 @@ class WatchTools(private val context: Context) {
         val sameDay = reported.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
             reported.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
         if (!sameDay) {
-            return "No steps reported yet today; the last report was on ${SimpleDateFormat("EEEE", Locale.UK).format(Date(at))}."
+            return "The watch hasn't reported a step count since midnight (the last report was on " +
+                "${SimpleDateFormat("EEEE", Locale.UK).format(Date(at))}). That doesn't mean no steps today; " +
+                "the count arrives in batches, and after a restart only once ClaudeWatch has been opened."
         }
         val steps = prefs.getLong(StepsService.KEY_STEPS, 0)
         return "$steps steps today, as of ${SimpleDateFormat("HH:mm", Locale.UK).format(Date(at))}."
@@ -378,6 +388,7 @@ class WatchTools(private val context: Context) {
     companion object {
         private const val LOCATION_TIMEOUT_MS = 15_000L
         private const val HEART_RATE_TIMEOUT_MS = 20_000L
+        private const val STEPS_FLUSH_WAIT_MS = 2_500L
         private const val MAX_EVENTS = 15
 
         /** Android 16 replaced BODY_SENSORS with a heart-rate permission for apps that target it. */

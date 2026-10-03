@@ -7,16 +7,23 @@ object SpokenText {
         "e.g", "i.e", "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "approx", "no", "fig",
     )
     private const val CLOSERS = "\"')]”’"
+    private const val MID_LINE = "\u0000"
 
-    /** Strips markdown that TTS would read out (asterisks, hashes, list markers, link targets). */
-    fun clean(text: String): String {
-        var s = text.replace(Regex("```[A-Za-z0-9]*"), "")
+    /**
+     * Strips markdown that TTS would read out (asterisks, hashes, list markers, link targets).
+     * [atLineStart] is false for a piece of text that begins mid-line, as a streamed chunk can:
+     * its first line is then not treated as a heading or list item.
+     */
+    fun clean(text: String, atLineStart: Boolean = true): String {
+        // A marker no line-start pattern can match, removed again below.
+        var s = if (atLineStart) text else MID_LINE + text
+        s = s.replace(Regex("```[A-Za-z0-9]*"), "")
         s = s.replace(Regex("\\[([^\\]]+)]\\([^)]+\\)"), "$1")
         s = s.replace(Regex("(?m)^\\s{0,3}#{1,6}\\s*"), "")
         s = s.replace(Regex("(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+"), "")
         s = s.replace("*", "").replace("`", "")
         // Each line becomes a sentence, so list items aren't run together when spoken.
-        return s.lines()
+        return s.replace(MID_LINE, "").lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .joinToString(" ") { line -> if (line.last() in ".!?:;,") line else "$line." }
@@ -69,7 +76,9 @@ object SpokenText {
                 }
                 val spaceFollows = i + 1 < text.length && text[i + 1].isWhitespace()
                 // "1." at the start of a list item numbers it; it doesn't end a sentence.
-                val line = current.substring(current.lastIndexOf('\n') + 1).trim()
+                // "1." alone at the start of a line numbers a list item; it doesn't end a sentence.
+                // Elsewhere, as in "The answer is 4. Anything else?", it does.
+                val line = text.substring(text.lastIndexOf('\n', i) + 1, i + 1).trim()
                 val listNumber = c == '.' && line.dropLast(1).let { it.isNotEmpty() && it.all(Char::isDigit) }
                 if (spaceFollows && !listNumber && !(c == '.' && endsWithAbbreviation(current))) {
                     end = i + 1
