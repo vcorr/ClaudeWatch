@@ -107,12 +107,7 @@ class ProbeActivity : Activity() {
             }
             log("TTS engines: ${engine.engines.joinToString { it.label }}")
             log("Default engine: ${engine.defaultEngine}")
-            val voices = engine.voices.orEmpty()
-            val english = voices.filter { it.locale.language == "en" }
-            val finnish = voices.filter { it.locale.language == "fi" }
-            log("English voices: ${english.size}, offline: ${english.count { !it.isNetworkConnectionRequired }}")
-            log("Finnish voices: ${finnish.size}, offline: ${finnish.count { !it.isNetworkConnectionRequired }}")
-            log("Conversation language so far: ${if (Language.finnish) "Finnish" else "English"} (Test speaking names the app's own voices)")
+            engine.engines.forEach { info -> describeEngine(info.name, info.label) }
         }
 
         log("— Claude round trip —")
@@ -130,6 +125,33 @@ class ProbeActivity : Activity() {
                 log("API failed after ${SystemClock.elapsedRealtime() - start} ms: ${e.message?.take(80)}")
             }
         }
+    }
+
+    /** Lists one engine's English and Finnish voices: stored on the watch, online, or not yet downloaded. */
+    private fun describeEngine(pkg: String, label: String) {
+        var probe: TextToSpeech? = null
+        probe = TextToSpeech(this, { status ->
+            val engine = probe ?: return@TextToSpeech
+            if (status != TextToSpeech.SUCCESS) {
+                log("$label: failed to start ($status)")
+            } else {
+                val voices = runCatching { engine.voices }.getOrNull().orEmpty()
+                fun summary(language: String): String {
+                    val matching = voices.filter { runCatching { it.locale.isO3Language }.getOrNull() == language }
+                    val (missing, installed) = matching.partition { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in it.features.orEmpty() }
+                    val online = installed.count { it.isNetworkConnectionRequired }
+                    return "${installed.size - online} stored, $online online, ${missing.size} to download"
+                }
+                val check = when (runCatching { engine.isLanguageAvailable(Language.FINNISH) }.getOrNull()) {
+                    null -> "failed"
+                    TextToSpeech.LANG_MISSING_DATA -> "needs download"
+                    TextToSpeech.LANG_NOT_SUPPORTED -> "not supported"
+                    else -> "available"
+                }
+                log("$label: ${voices.size} voices; English ${summary("eng")}; Finnish ${summary("fin")}, says $check")
+            }
+            engine.shutdown()
+        }, pkg)
     }
 
     // ── Interactive tests ───────────────────────────────────
@@ -284,10 +306,13 @@ class ProbeActivity : Activity() {
         log("Speaking a sample. Was it loud and clear enough?")
         sp.speak(Language.say("This is how Claude will sound on your watch.", "Näin Claude kuulostaa kellossasi.")) {
             log("Voice: ${sp.description}")
+            log("Conversation: ${if (Language.finnish) "Finnish" else "English"} (Finnish voice ${yesNo(Language.finnishSpoken)}, Finnish listening ${yesNo(Language.finnishHeard)})")
         }
     }
 
     // ── Helpers ─────────────────────────────────────────────
+
+    private fun yesNo(value: Boolean) = if (value) "yes" else "no"
 
     private fun log(line: String) {
         runOnUiThread {

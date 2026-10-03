@@ -20,10 +20,13 @@ import java.util.Locale
  * when streaming, [end] has been called), or straight away if TTS is unavailable. Call from the
  * main thread.
  *
- * It prefers an engine with a Finnish voice, Google's first (installed on Galaxy Watches beside
- * Samsung's default), and speaks Finnish while the conversation is Finnish ([Language]); with no
- * Finnish voice anywhere it settles on the best English one and turns Finnish off. While it talks it lifts a near-silent
- * media volume to an audible floor and puts it back afterwards; a muted watch stays muted.
+ * It prefers the engine with the best Finnish voice, Google's first (installed on Galaxy Watches
+ * beside Samsung's default): one stored on the watch, else one that speaks over the network (the
+ * watch is online whenever it talks to Claude). It speaks Finnish while the conversation is Finnish
+ * ([Language]); with no Finnish voice anywhere it settles on English and turns Finnish off, and asks
+ * the engine to fetch a Finnish voice it offers but hasn't installed, for next time. While it talks
+ * it lifts a near-silent media volume to an audible floor and puts it back afterwards; a muted watch
+ * stays muted.
  */
 class Speaker(context: Context) {
 
@@ -59,14 +62,18 @@ class Speaker(context: Context) {
         private set
 
     // Engines to try, best first: Google's (installed beside Samsung's on Galaxy Watches), then
-    // the watch's default (null). An engine with a Finnish voice wins; failing that, the first one
-    // that speaks English, which is kept running meanwhile rather than restarted.
+    // the watch's default (null). The one with the best Finnish wins (see [finnishRank]); the best
+    // so far is kept running meanwhile rather than restarted.
     private val candidates: List<String?> = listOfNotNull(GOOGLE_TTS.takeIf { installed(it) }) + listOf<String?>(null)
-    private var fallback: TextToSpeech? = null
-    private var fallbackEngine: String? = null
+    private var best: TextToSpeech? = null
+    private var bestEngine: String? = null
+    private var bestRank = NOT_USABLE
     private var englishVoice: Voice? = null
     private var finnishVoice: Voice? = null
+    // A Finnish voice the engine offers but hasn't downloaded yet.
+    private var finnishToFetch: Voice? = null
     private var hasFinnish = false
+    private var finnishRank = NOT_USABLE
     private var speakingFinnish: Boolean? = null
     private val onDecided = mutableListOf<() -> Unit>()
 
@@ -89,24 +96,21 @@ class Speaker(context: Context) {
         created = TextToSpeech(appContext, { status ->
             main.post {
                 if (tts !== created) return@post
-                val usable = status == TextToSpeech.SUCCESS && configure()
-                if (usable && hasFinnish) {
-                    fallback?.shutdown()
-                    fallback = null
-                    becomeReady()
-                    return@post
-                }
-                if (usable && fallback == null) {
-                    fallback = created
-                    fallbackEngine = enginePackage
+                val rank = if (status == TextToSpeech.SUCCESS && configure()) finnishRank else NOT_USABLE
+                if (rank > bestRank) {
+                    best?.shutdown()
+                    best = created
+                    bestEngine = enginePackage
+                    bestRank = rank
                 } else {
                     created?.shutdown()
                 }
                 val next = index + 1
                 when {
+                    // A stored Finnish voice can't be bettered.
+                    rank == FINNISH_STORED -> settle()
                     next < candidates.size -> start(next)
-                    // No engine has Finnish: use the English one already running.
-                    fallback != null -> adoptFallback()
+                    best != null -> settle()
                     else -> fail()
                 }
             }
@@ -114,12 +118,29 @@ class Speaker(context: Context) {
         tts = created
     }
 
-    private fun adoptFallback() {
-        tts = fallback
-        engine = fallbackEngine
-        fallback = null
-        configure()
+    /** Uses the best engine found, configured afresh since later candidates overwrote its voices. */
+    private fun settle() {
+        if (tts !== best) {
+            tts = best
+            engine = bestEngine
+            configure()
+        }
+        best = null
+        if (!hasFinnish) fetchFinnish()
         becomeReady()
+    }
+
+    /**
+     * Asks the engine to download the Finnish voice it offers: selecting a voice that isn't
+     * installed starts its download (see [TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED]). This run
+     * stays English; a later one finds the voice installed.
+     */
+    private fun fetchFinnish() {
+        val tts = tts ?: return
+        val voice = finnishToFetch ?: return
+        runCatching { tts.voice = voice }
+        speakingFinnish = null
+        description += ", fetching ${voice.name}"
     }
 
     private fun becomeReady() {
@@ -152,17 +173,26 @@ class Speaker(context: Context) {
         val tts = tts ?: return false
         tts.setAudioAttributes(attributes)
         val voices = runCatching { tts.voices }.getOrNull().orEmpty()
-        englishVoice = bestVoice(voices, "en", locale.country)
-        finnishVoice = bestVoice(voices, "fi", "FI")
+        englishVoice = bestVoice(voices, locale)
+        finnishVoice = bestVoice(voices, Language.FINNISH)
+        finnishToFetch = voices.firstOrNull { it.locale.sameLanguage(Language.FINNISH) && it.notInstalled }
         val hasEnglish = englishVoice != null || available(tts, locale) || available(tts, Locale.ENGLISH)
-        // An engine that lists its voices must list an installed Finnish one (a network-only voice
-        // fails offline); one that lists none, like Samsung's, is taken at its word.
-        hasFinnish = finnishVoice != null || (voices.isEmpty() && available(tts, Language.FINNISH))
+        // Taken at its word only by an engine that lists no Finnish voice, like Samsung's, which
+        // lists none at all: one that lists Finnish only as a download would fail to speak it.
+        val finnishAvailable = voices.none { it.locale.sameLanguage(Language.FINNISH) } && available(tts, Language.FINNISH)
+        finnishRank = when {
+            finnishVoice?.isNetworkConnectionRequired == false -> FINNISH_STORED
+            finnishVoice != null || finnishAvailable -> FINNISH_ONLINE
+            hasEnglish -> ENGLISH_ONLY
+            else -> NOT_USABLE
+        }
+        hasFinnish = finnishRank >= FINNISH_ONLINE
         speakingFinnish = null
         tts.setSpeechRate(SPEECH_RATE)
         // The engine asked for; if it can't bind, the framework may quietly use another.
+        val finnishName = finnishVoice?.let { "${it.name}${if (it.isNetworkConnectionRequired) " (online)" else ""}" }
         description = "${engine ?: tts.defaultEngine}, English: ${englishVoice?.name ?: if (hasEnglish) "default" else "none"}, " +
-            "Finnish: ${finnishVoice?.name ?: if (hasFinnish) "default" else "none"}"
+            "Finnish: ${finnishName ?: if (finnishAvailable) "default" else "none"}"
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
 
@@ -173,7 +203,7 @@ class Speaker(context: Context) {
 
             override fun onError(utteranceId: String?, errorCode: Int) = finishIfLast(utteranceId)
         })
-        return hasEnglish || hasFinnish
+        return finnishRank > NOT_USABLE
     }
 
     private fun available(tts: TextToSpeech, locale: Locale) =
@@ -194,20 +224,23 @@ class Speaker(context: Context) {
         }
     }
 
-    /** An installed, offline voice in [language], preferring [country]; null if there is none. */
-    private fun bestVoice(voices: Collection<Voice>, language: String, country: String): Voice? =
+    /**
+     * The best installed voice for [wanted]'s language: one stored on the watch over one that needs
+     * the network, then [wanted]'s country, quality and speed. Null if there is none.
+     */
+    private fun bestVoice(voices: Collection<Voice>, wanted: Locale): Voice? =
         voices
-            .filter { voice ->
-                voice.locale.language == language &&
-                    TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in voice.features.orEmpty() &&
-                    !voice.isNetworkConnectionRequired
-            }
+            .filter { it.locale.sameLanguage(wanted) && !it.notInstalled }
             .sortedWith(
-                compareByDescending<Voice> { it.locale.country == country }
+                compareBy<Voice> { it.isNetworkConnectionRequired }
+                    .thenByDescending { it.locale.sameCountry(wanted) }
                     .thenByDescending { it.quality }
                     .thenBy { it.latency }
             )
             .firstOrNull()
+
+    private val Voice.notInstalled: Boolean
+        get() = TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in features.orEmpty()
 
     /** Speaks a whole reply. */
     fun speak(text: String, onDone: () -> Unit) {
@@ -261,8 +294,8 @@ class Speaker(context: Context) {
         stop()
         tts?.shutdown()
         tts = null
-        fallback?.shutdown()
-        fallback = null
+        best?.shutdown()
+        best = null
     }
 
     private fun finishIfLast(utteranceId: String?) {
@@ -344,5 +377,21 @@ class Speaker(context: Context) {
         const val SPEECH_RATE = 1.1f
         const val MIN_VOLUME_FRACTION = 0.4f
         const val WAIT_RELEASE_MS = 1_500L
+
+        // How well an engine serves the conversation, worst first.
+        const val NOT_USABLE = 0
+        const val ENGLISH_ONLY = 1
+        const val FINNISH_ONLINE = 2
+        const val FINNISH_STORED = 3
     }
 }
+
+// Engines name a voice's locale with two- or three-letter codes ("fi" or "fin"), so compare the
+// three-letter forms.
+private fun Locale.sameLanguage(other: Locale) = iso3Language() == other.iso3Language()
+
+private fun Locale.sameCountry(other: Locale) = iso3Country() == other.iso3Country()
+
+private fun Locale.iso3Language() = runCatching { isO3Language }.getOrDefault(language)
+
+private fun Locale.iso3Country() = runCatching { isO3Country }.getOrDefault(country)
