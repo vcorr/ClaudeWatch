@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <!-- Steps today, from Health Services' passive feed. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Asking the Clock app for timers and alarms; granted at install. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- API 30+ hides these from apps that don't declare them. The app needs them, not just the
          diagnostics: in-app listening finds its speech services this way, and the speaker
