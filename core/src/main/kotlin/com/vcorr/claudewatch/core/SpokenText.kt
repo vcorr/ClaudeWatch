@@ -50,6 +50,34 @@ object SpokenText {
         return out
     }
 
+    /**
+     * For text still arriving: how much of it is finished sentences, which can be spoken now. A
+     * sentence counts as finished only once whitespace follows its full stop, question or
+     * exclamation mark, because more text might yet make "3." into "3.5" or "e.g" into "e.g.".
+     */
+    fun completeLength(text: String): Int {
+        var end = 0
+        val current = StringBuilder()
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            current.append(c)
+            if (c == '.' || c == '!' || c == '?') {
+                while (i + 1 < text.length && text[i + 1] in CLOSERS) {
+                    i++
+                    current.append(text[i])
+                }
+                val spaceFollows = i + 1 < text.length && text[i + 1].isWhitespace()
+                if (spaceFollows && !(c == '.' && endsWithAbbreviation(current))) {
+                    end = i + 1
+                    current.clear()
+                }
+            }
+            i++
+        }
+        return end
+    }
+
     /** For a reply cut off by the token limit: everything up to the last complete sentence. */
     fun upToLastSentence(text: String): String {
         val trimmed = text.trim()
