@@ -38,6 +38,7 @@ class ProbeActivity : Activity() {
     private var tts: TextToSpeech? = null
     private var inApp: InAppSpeechInput? = null
     private var recognizer: SpeechRecognizer? = null
+    private var speaker: Speaker? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -274,13 +275,11 @@ class ProbeActivity : Activity() {
         log("System dialog result: $outcome (${seconds}s)")
     }
 
+    /** Speaks a sample with the app's own speaker, so this sounds exactly like a reply. */
     private fun testSpeech() {
-        val engine = tts ?: run {
-            log("TTS not ready")
-            return
-        }
-        engine.speak("This is how Claude will sound on your watch.", TextToSpeech.QUEUE_FLUSH, null, "probe")
+        val sp = speaker ?: Speaker(this).also { speaker = it }
         log("Speaking a sample. Was it loud and clear enough?")
+        sp.speak("This is how Claude will sound on your watch.") { log("Voice: ${sp.description}") }
     }
 
     // ── Helpers ─────────────────────────────────────────────
@@ -295,6 +294,7 @@ class ProbeActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         stopTrials()
+        speaker?.shutdown()
         tts?.shutdown()
         scope.cancel()
     }

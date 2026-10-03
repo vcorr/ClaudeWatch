@@ -15,6 +15,7 @@ import android.net.NetworkRequest
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
 import android.view.WindowManager
@@ -39,6 +40,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.net.Inet4Address
 
 class MainActivity : Activity() {
@@ -100,8 +102,13 @@ class MainActivity : Activity() {
     private var useDialog = false
     private var requestJob: Job? = null
     private var followUpJob: Job? = null
+    private var closeJob: Job? = null
     private var foreground = false
     private var listenOnLaunch = false
+    // Set when the app goes to the background on its own account, so coming back (a double press of
+    // the Home key, say) listens again, as a fresh launch does. Not set for our own screens.
+    private var listenOnReturn = false
+    private var leavingForOwnScreen = false
     private var listenAfterPermission = false
     private var toolPermissionsAsked = false
 
@@ -163,9 +170,16 @@ class MainActivity : Activity() {
         btnTalkSmall.setOnClickListener { onTalkTapped() }
         btnStop.setOnClickListener { interrupt(null) }
         btnCancel.setOnClickListener { interrupt(null) }
+        // While Claude talks, or waits for a follow-up, a tap anywhere stops it, not just the button.
+        val stopAnywhere = View.OnClickListener {
+            if (state == State.SPEAKING || state == State.FOLLOW_UP) interrupt(null)
+        }
+        layoutVoice.setOnClickListener(stopAnywhere)
+        tvReply.setOnClickListener(stopAnywhere)
         // The voice diagnostics hide behind a long press on either microphone button.
         val openProbe = View.OnLongClickListener {
             interrupt(null)
+            leavingForOwnScreen = true
             startActivity(Intent(this, ProbeActivity::class.java))
             true
         }
@@ -181,6 +195,31 @@ class MainActivity : Activity() {
         // Launching the app goes straight into listening, like a voice assistant.
         listenOnLaunch = savedInstanceState == null
         render()
+
+        // Carry on the last chat if it was recent; the reply view shows where it stopped.
+        scope.launch {
+            val saved = ConversationStore.load(this@MainActivity)
+            if (saved.isEmpty() || conversation.all.isNotEmpty()) return@launch
+            conversation.restore(saved)
+            val turns = conversation.all
+            if (turns.size >= 2) {
+                shownQuestion = turns[turns.lastIndex - 1].text
+                shownReply = turns.last().text
+                tvReply.text = turns.last().text
+                if (state == State.IDLE) render()
+            }
+        }
+    }
+
+    // Any touch or turn of the bezel means the wearer is reading: don't close under them.
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        cancelClose()
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        cancelClose()
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     override fun onStart() {
@@ -190,6 +229,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // A permission prompt may only pause the app, never stopping it; either way it's over now.
+        leavingForOwnScreen = false
         if (dialogInput.isOpen) return
         scope.launch {
             // Also restarts setup after a pause, e.g. when it was opened because the key was rejected.
@@ -198,6 +239,9 @@ class MainActivity : Activity() {
             } else if (listenOnLaunch) {
                 listenOnLaunch = false
                 startListening(followUp = false)
+            } else if (listenOnReturn) {
+                listenOnReturn = false
+                if (state == State.IDLE) startListening(followUp = false)
             }
         }
     }
@@ -210,8 +254,13 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         foreground = false
+        cancelClose()
         // The system speech dialog stops this activity while it is open; that is expected.
         if (dialogInput.isOpen) return
+        // Back from our own screens (diagnostics, permission prompts) stays as it was; back from
+        // anywhere else listens, as a fresh launch would.
+        listenOnReturn = !leavingForOwnScreen && !listenAfterPermission
+        leavingForOwnScreen = false
         // The microphone may only be used while the app is visible; a reply may finish speaking.
         if (state == State.LISTENING || state == State.FOLLOW_UP) interrupt(null)
     }
@@ -243,7 +292,7 @@ class MainActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startListening(followUp = false)
         } else {
-            goIdle("Microphone permission is needed to talk", problem = true)
+            goIdle("Microphone permission is needed to talk", problem = true, spoken = "I need the microphone permission to hear you.")
         }
     }
 
@@ -276,6 +325,7 @@ class MainActivity : Activity() {
     private fun startListening(followUp: Boolean) {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             listenAfterPermission = true
+            leavingForOwnScreen = true
             // The watch tools' permissions are asked for at the same time, once.
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO) + toolPermissionsToAsk(), REQ_MIC)
             return
@@ -284,9 +334,13 @@ class MainActivity : Activity() {
             // Installed before the watch tools existed: ask for theirs once, then listen.
             toolPermissionsAsked = true
             listenAfterPermission = true
+            leavingForOwnScreen = true
             requestPermissions(toolPermissionsToAsk(), REQ_MIC)
             return
         }
+        cancelClose()
+        // Never listen over our own voice, such as a spoken error.
+        speaker.stop()
         val token = ++turnToken
         val input = currentInput()
         state = if (followUp) State.FOLLOW_UP else State.LISTENING
@@ -326,14 +380,21 @@ class MainActivity : Activity() {
             override fun onResult(text: String) {
                 if (!current()) return
                 followUpJob?.cancel()
-                tick()
+                buzz(VibrationEffect.EFFECT_CLICK)
                 ask(text)
             }
 
             override fun onNothingHeard() {
                 if (!current()) return
                 followUpJob?.cancel()
-                if (followUp) goIdle(null) else goIdle("Didn't catch that", problem = true)
+                if (followUp) {
+                    endConversation()
+                } else {
+                    // Silence after a launch is often a launch by mistake: a buzz, not a voice, and
+                    // the app closes itself unless touched.
+                    goIdle("Didn't catch that", problem = true)
+                    scheduleClose()
+                }
             }
 
             override fun onError(message: String, routeUnavailable: Boolean) {
@@ -345,7 +406,7 @@ class MainActivity : Activity() {
                     startListening(followUp)
                     return
                 }
-                goIdle(message, problem = true)
+                goIdle(message, problem = true, spoken = "Sorry, I couldn't listen just then.")
             }
         })
 
@@ -355,7 +416,7 @@ class MainActivity : Activity() {
                 delay(FOLLOW_UP_WINDOW_MS)
                 if (token == turnToken && !heardSpeech) {
                     input.cancel()
-                    goIdle(null)
+                    endConversation()
                 }
             }
         }
@@ -363,6 +424,7 @@ class MainActivity : Activity() {
 
     private fun ask(text: String) {
         val token = turnToken
+        cancelClose()
         conversation.addUser(text)
         state = State.THINKING
         pendingQuestion = text
@@ -380,6 +442,7 @@ class MainActivity : Activity() {
                 }
                 if (token != turnToken) return@launch
                 conversation.addAssistant(reply.text)
+                ConversationStore.save(this@MainActivity, conversation.all)
                 shownQuestion = text
                 shownReply = reply.text
                 tvReply.text = reply.display
@@ -393,7 +456,15 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 if (token != turnToken) return@launch
                 conversation.dropUnanswered()
-                goIdle("Couldn't reach Claude: ${e.message?.take(80) ?: "unknown error"}", problem = true)
+                if (e is IOException || e is SocketTimeoutException) {
+                    goIdle("No connection to Claude", problem = true, spoken = "I can't reach Claude right now. Check the watch's connection.")
+                } else {
+                    goIdle(
+                        "Claude had a problem: ${e.message?.take(80) ?: "unknown error"}",
+                        problem = true,
+                        spoken = "Claude had a problem. Try again in a moment.",
+                    )
+                }
             }
         }
     }
@@ -401,6 +472,7 @@ class MainActivity : Activity() {
     private fun speak(reply: String, token: Int) {
         state = State.SPEAKING
         render()
+        buzz(VibrationEffect.EFFECT_DOUBLE_CLICK)
         speaker.speak(SpokenText.clean(reply)) {
             if (token != turnToken) return@speak
             if (!foreground) {
@@ -427,17 +499,48 @@ class MainActivity : Activity() {
         goIdle(message)
     }
 
-    private fun goIdle(message: String?, problem: Boolean = false) {
+    /**
+     * Shows the idle face. A problem also buzzes and, if [spoken] is given and the app is in front,
+     * is said aloud, since the wearer may not be looking.
+     */
+    private fun goIdle(message: String?, problem: Boolean = false, spoken: String? = null) {
         state = State.IDLE
         idleMessage = message
         idleProblem = problem && message != null
         keepScreenOn(false)
         render()
+        if (idleProblem) {
+            buzz(VibrationEffect.EFFECT_HEAVY_CLICK)
+            if (spoken != null && foreground) speaker.speak(spoken) {}
+        }
+    }
+
+    /**
+     * The follow-up window closed in silence: the conversation is over for now. The reply stays on
+     * screen for a moment, then the app gets out of the way, as Gemini does. A touch keeps it open.
+     */
+    private fun endConversation() {
+        goIdle(null)
+        scheduleClose()
+    }
+
+    private fun scheduleClose() {
+        closeJob?.cancel()
+        closeJob = scope.launch {
+            delay(AUTO_CLOSE_MS)
+            if (state == State.IDLE) finish()
+        }
+    }
+
+    private fun cancelClose() {
+        closeJob?.cancel()
+        closeJob = null
     }
 
     private fun newChat() {
         interrupt(null)
         conversation.clear()
+        scope.launch { ConversationStore.clear(this@MainActivity) }
         shownQuestion = ""
         shownReply = null
         tvReply.text = ""
@@ -448,6 +551,7 @@ class MainActivity : Activity() {
 
     private fun showTyping() {
         interrupt(null)
+        cancelClose()
         state = State.TYPING
         render()
         etPrompt.requestFocus()
@@ -559,15 +663,21 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun tick() {
+    // Haptics tell the wearer where things stand without looking: a tick when listening starts, a
+    // click when their words are in, a double click as the answer begins, a heavy click for a problem.
+    private fun tick() = buzz(VibrationEffect.EFFECT_TICK)
+
+    private fun buzz(effect: Int) {
         getSystemService(Vibrator::class.java)
-            ?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+            ?.takeIf { it.hasVibrator() }
+            ?.vibrate(VibrationEffect.createPredefined(effect))
     }
 
     // ── Key setup over the local Wi-Fi ──────────────────────
 
     private fun showSetup(notice: String?) {
         interrupt(null)
+        cancelClose()
         state = State.SETUP
         render()
         keepScreenOn(true)
@@ -655,6 +765,7 @@ class MainActivity : Activity() {
         const val REQ_DIALOG = 2
         const val FOLLOW_UP_WINDOW_MS = 3_500L
         const val MIC_DELAY_MS = 200L
+        const val AUTO_CLOSE_MS = 8_000L
         const val PARTIAL_CHARS = 70
         const val PREFS = "claudewatch"
     }
