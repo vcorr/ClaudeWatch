@@ -35,11 +35,13 @@
 
     <application
         android:allowBackup="false"
-        android:label="ClaudeWatch"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
         android:theme="@android:style/Theme.DeviceDefault">
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -55,14 +57,16 @@
         <service
             android:name=".TalkTileService"
             android:exported="true"
-            android:label="Claude"
+            android:description="@string/tile_description"
+            android:icon="@drawable/ic_launcher"
+            android:label="@string/app_name"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
                 <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
-                android:resource="@drawable/clawd" />
+                android:resource="@drawable/tile_preview" />
         </service>
 
         <!-- Only Health Services may bind: it delivers the daily step count here. -->

@@ -194,8 +194,12 @@ class Speaker(context: Context) {
         main.post {
             if (utteranceId == null || utteranceId != lastUtteranceId) return@post
             lastUtteranceId = null
-            // Waiting for more of a reply (a tool may be running): don't hold the music down meanwhile.
-            if (streamOpen) releaseAudio()
+            // Waiting for more of a reply (a tool may be running): let the music back up if the
+            // wait goes on, but not between sentences that are merely a moment apart.
+            if (streamOpen) {
+                main.removeCallbacks(releaseWhileWaiting)
+                main.postDelayed(releaseWhileWaiting, WAIT_RELEASE_MS)
+            }
             finishIfIdle()
         }
     }
@@ -209,7 +213,12 @@ class Speaker(context: Context) {
         main.post(done)
     }
 
+    private val releaseWhileWaiting = Runnable {
+        if (streamOpen && lastUtteranceId == null) releaseAudio()
+    }
+
     private fun holdAudio() {
+        main.removeCallbacks(releaseWhileWaiting)
         if (audioHeld) return
         audioHeld = true
         audioManager.requestAudioFocus(focusRequest)
@@ -217,6 +226,7 @@ class Speaker(context: Context) {
     }
 
     private fun releaseAudio() {
+        main.removeCallbacks(releaseWhileWaiting)
         if (!audioHeld) return
         audioHeld = false
         audioManager.abandonAudioFocusRequest(focusRequest)
@@ -258,5 +268,6 @@ class Speaker(context: Context) {
         const val GOOGLE_TTS = "com.google.android.tts"
         const val SPEECH_RATE = 1.1f
         const val MIN_VOLUME_FRACTION = 0.4f
+        const val WAIT_RELEASE_MS = 1_500L
     }
 }

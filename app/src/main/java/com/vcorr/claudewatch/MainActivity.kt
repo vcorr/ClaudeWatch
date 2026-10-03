@@ -240,6 +240,19 @@ class MainActivity : Activity() {
         return super.dispatchGenericMotionEvent(ev)
     }
 
+    /**
+     * Opened again while already running (the tile, a Home-key double press, the launcher): the
+     * app is single-task, so this same instance gets the request. Whatever it was doing stops, and
+     * it listens afresh, as a launch does.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (dialogInput.isOpen || state == State.SETUP) return
+        interrupt(null)
+        listenOnLaunch = true
+    }
+
     override fun onStart() {
         super.onStart()
         foreground = true
@@ -630,6 +643,7 @@ class MainActivity : Activity() {
      */
     private fun goIdle(message: String?, problem: Boolean = false, spoken: String? = null) {
         state = State.IDLE
+        toolLabel = null
         idleMessage = message
         idleProblem = problem && message != null
         keepScreenOn(false)

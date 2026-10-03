@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon: Clawd in dark ink on an accent disc. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="@color/accent"
+        android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <group
+        android:scaleX="1.6"
+        android:scaleY="1.6"
+        android:translateX="9.6"
+        android:translateY="16">
+        <path
+            android:fillColor="@color/ink_on_accent"
+            android:pathData="M3,0h12v2h-12z M3,2h2v2h-2z M6,2h6v2h-6z M13,2h2v2h-2z M1,4h16v2h-16z M3,6h12v2h-12z M4,8h1v2h-1z M6,8h1v2h-1z M11,8h1v2h-1z M13,8h1v2h-1z" />
+    </group>
+</vector>

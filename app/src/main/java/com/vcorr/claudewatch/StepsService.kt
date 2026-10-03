@@ -10,7 +10,10 @@ import androidx.health.services.client.PassiveListenerService
 import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
 import androidx.health.services.client.data.PassiveListenerConfig
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
+import kotlin.coroutines.resume
 
 /**
  * Receives today's step count from Health Services in the background, in batches, and keeps the
@@ -34,6 +37,7 @@ class StepsService : PassiveListenerService() {
         const val PREFS = "steps"
         const val KEY_STEPS = "daily"
         const val KEY_AT = "at"
+        private const val FLUSH_TIMEOUT_MS = 3_000L
 
         /**
          * Asks Health Services to send daily steps to this service. Registrations don't survive a
@@ -58,13 +62,24 @@ class StepsService : PassiveListenerService() {
             }
         }
 
-        /** Asks Health Services to deliver any steps it is holding back, rather than at the next batch. */
-        fun flush(context: Context) {
-            try {
-                HealthServices.getClient(context.applicationContext).passiveMonitoringClient.flushAsync()
-            } catch (e: Exception) {
-                Log.d(TAG, "steps flush failed: ${e.javaClass.simpleName}")
-            }
+        /**
+         * Asks Health Services to deliver any steps it is holding back, rather than at the next
+         * batch, and waits (up to a few seconds) until it has done so. True if the flush went through.
+         */
+        suspend fun flush(context: Context): Boolean = try {
+            val future = HealthServices.getClient(context.applicationContext).passiveMonitoringClient.flushAsync()
+            withTimeoutOrNull(FLUSH_TIMEOUT_MS) {
+                suspendCancellableCoroutine { cont ->
+                    future.addListener(
+                        { if (cont.isActive) cont.resume(runCatching { future.get() }.isSuccess) },
+                        context.applicationContext.mainExecutor,
+                    )
+                    cont.invokeOnCancellation { future.cancel(false) }
+                }
+            } ?: false
+        } catch (e: Exception) {
+            Log.d(TAG, "steps flush failed: ${e.javaClass.simpleName}")
+            false
         }
     }
 }

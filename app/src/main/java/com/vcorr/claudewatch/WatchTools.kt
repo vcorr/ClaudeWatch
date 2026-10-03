@@ -284,10 +284,10 @@ class WatchTools(private val context: Context) {
         val prefs = context.getSharedPreferences(StepsService.PREFS, Context.MODE_PRIVATE)
         // Steps arrive in batches, so ask for the latest and give it a moment to land.
         val before = prefs.getLong(StepsService.KEY_AT, 0)
-        StepsService.register(context)
-        StepsService.flush(context)
-        withTimeoutOrNull(STEPS_FLUSH_WAIT_MS) {
-            while (prefs.getLong(StepsService.KEY_AT, 0) == before) delay(250)
+        if (StepsService.flush(context)) {
+            withTimeoutOrNull(STEPS_FLUSH_WAIT_MS) {
+                while (prefs.getLong(StepsService.KEY_AT, 0) == before) delay(200)
+            }
         }
         val at = prefs.getLong(StepsService.KEY_AT, 0)
         if (at == 0L) {
@@ -388,7 +388,7 @@ class WatchTools(private val context: Context) {
     companion object {
         private const val LOCATION_TIMEOUT_MS = 15_000L
         private const val HEART_RATE_TIMEOUT_MS = 20_000L
-        private const val STEPS_FLUSH_WAIT_MS = 2_500L
+        private const val STEPS_FLUSH_WAIT_MS = 1_500L
         private const val MAX_EVENTS = 15
 
         /** Android 16 replaced BODY_SENSORS with a heart-rate permission for apps that target it. */

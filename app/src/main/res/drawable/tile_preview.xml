@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the Talk tile looks like, for the watch's tile picker: Clawd above the accent Talk button. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M100,0a100,100 0,1 1,0 200a100,100 0,1 1,0 -200z" />
+    <group
+        android:scaleX="3"
+        android:scaleY="3"
+        android:translateX="73"
+        android:translateY="42">
+        <path
+            android:fillColor="@color/accent"
+            android:pathData="M3,0h12v2h-12z M3,2h2v2h-2z M6,2h6v2h-6z M13,2h2v2h-2z M1,4h16v2h-16z M3,6h12v2h-12z M4,8h1v2h-1z M6,8h1v2h-1z M11,8h1v2h-1z M13,8h1v2h-1z" />
+    </group>
+    <path
+        android:fillColor="@color/accent"
+        android:pathData="M100,86a32,32 0,1 1,0 64a32,32 0,1 1,0 -64z" />
+    <group
+        android:scaleX="1.4"
+        android:scaleY="1.4"
+        android:translateX="83.2"
+        android:translateY="101.2">
+        <path
+            android:pathData="M12,2a3,3 0,0 0,-3 3v6a3,3 0,0 0,6 0V5a3,3 0,0 0,-3 -3z M5,10a7,7 0,0 0,14 0 M12,17v4"
+            android:strokeColor="@color/ink_on_accent"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="2" />
+    </group>
+</vector>

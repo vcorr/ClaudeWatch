@@ -161,6 +161,8 @@ object ClaudeApi {
         withSearch: Boolean,
         onText: (String) -> Unit,
     ): JSONObject = coroutineScope {
+        // Interrupted during a tool that didn't notice: don't send (and pay for) the next request.
+        ensureActive()
         val body = JSONObject()
             .put("model", MODEL)
             .put("max_tokens", MAX_TOKENS)
