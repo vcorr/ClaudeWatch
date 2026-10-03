@@ -10,6 +10,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -36,6 +37,7 @@ class ProbeActivity : Activity() {
     private lateinit var tvLog: TextView
     private var tts: TextToSpeech? = null
     private var inApp: InAppSpeechInput? = null
+    private var recognizer: SpeechRecognizer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +46,7 @@ class ProbeActivity : Activity() {
         tvLog = findViewById(R.id.tv_probe_log)
 
         findViewById<Button>(R.id.btn_probe_listen).setOnClickListener { testInAppListening() }
+        findViewById<Button>(R.id.btn_probe_routes).setOnClickListener { testRoutes() }
         findViewById<Button>(R.id.btn_probe_dialog).setOnClickListener { testSystemDialog() }
         findViewById<Button>(R.id.btn_probe_speak).setOnClickListener { testSpeech() }
 
@@ -67,6 +70,7 @@ class ProbeActivity : Activity() {
         log("${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         val micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         log("Mic permission: ${if (micGranted) "granted" else "DENIED"}")
+        log("Watch language: ${java.util.Locale.getDefault().toLanguageTag()}")
 
         log("— Speech in —")
         log("SpeechRecognizer available: ${SpeechRecognizer.isRecognitionAvailable(this)}")
@@ -126,29 +130,118 @@ class ProbeActivity : Activity() {
 
     /**
      * Runs the app's own in-app listening, which tries every speech route in turn, and logs each
-     * attempt: which route, which language, and why it failed. Speak once it says "listening".
+     * attempt: which route, which language, and why it failed.
      */
-    private fun testInAppListening() {
-        inApp?.destroy()
+    private fun testRoutes() {
+        stopTrials()
         val start = SystemClock.elapsedRealtime()
         fun t() = "${(SystemClock.elapsedRealtime() - start) / 100 / 10.0}s"
         val input = InAppSpeechInput(this)
         input.log = { line -> log("· $line (${t()})") }
         inApp = input
-        log("In-app listening: trying each speech route")
+        log("Routes: trying each speech route")
         input.start(object : SpeechInput.Listener {
             override fun onListening() = log("Speak now…")
             override fun onSpeechStarted() = log("Heard speech (${t()})")
             override fun onPartial(text: String) = log("… $text")
-            override fun onResult(text: String) = log("In-app result: \"$text\" (${t()})")
-            override fun onNothingHeard() = log("In-app: heard nothing (${t()})")
+            override fun onResult(text: String) = log("Result: \"$text\" (${t()})")
+            override fun onNothingHeard() = log("Heard nothing (${t()})")
             override fun onError(message: String, routeUnavailable: Boolean) =
-                log("In-app: $message${if (routeUnavailable) ", so the app would open the system dialog" else ""}")
+                log("$message${if (routeUnavailable) ", so the app would open the system dialog" else ""}")
         })
         scope.launch {
             delay(20_000)
             if (inApp === input) input.stop()
         }
+    }
+
+    /** One way of asking the default recogniser to listen. */
+    private class Trial(val label: String, val language: String?, val partials: Boolean, val preferOffline: Boolean)
+
+    private val trials = listOf(
+        Trial("en-US", "en-US", partials = true, preferOffline = false),
+        Trial("en-GB", "en-GB", partials = true, preferOffline = false),
+        Trial("watch language", null, partials = true, preferOffline = false),
+        Trial("en-US, no live words", "en-US", partials = false, preferOffline = false),
+        Trial("en-US, offline", "en-US", partials = true, preferOffline = true),
+    )
+    private var trialRun = 0
+
+    /**
+     * Listens five times in a row with the default recogniser, each time asking a little
+     * differently, with a fresh recogniser each time. The wearer says the same short phrase in each
+     * trial; whichever trials return words show how the app should ask.
+     */
+    private fun testInAppListening() {
+        stopTrials()
+        val run = ++trialRun
+        log("Trials: say \"one two three\" each time it says Speak")
+        runTrial(run, 0)
+    }
+
+    private fun runTrial(run: Int, index: Int) {
+        if (run != trialRun) return
+        if (index >= trials.size) {
+            log("Trials done")
+            return
+        }
+        val trial = trials[index]
+        val start = SystemClock.elapsedRealtime()
+        fun t() = "${(SystemClock.elapsedRealtime() - start) / 100 / 10.0}s"
+        recognizer?.destroy()
+        val sr = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = sr
+        var began = false
+        var finished = false
+        fun next(outcome: String) {
+            if (finished || run != trialRun) return
+            finished = true
+            log("${index + 1}. ${trial.label}: $outcome${if (began) "" else ", speech never detected"} (${t()})")
+            scope.launch {
+                delay(1_200)
+                runTrial(run, index + 1)
+            }
+        }
+        sr.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (run == trialRun) log("${index + 1}. ${trial.label}: Speak")
+            }
+            override fun onBeginningOfSpeech() {
+                began = true
+            }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+            override fun onError(error: Int) = next(SpeechInput.errorName(error))
+            override fun onResults(results: Bundle?) {
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                next(if (text.isNullOrBlank()) "empty result" else "\"$text\"")
+            }
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, trial.partials)
+        trial.language?.let { intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
+        if (trial.preferOffline) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        sr.startListening(intent)
+        // A trial that hangs is stopped, which asks the recogniser for what it has so far.
+        scope.launch {
+            delay(7_000)
+            if (!finished && recognizer === sr) sr.stopListening()
+            delay(3_000)
+            next("no answer within 10 s")
+        }
+    }
+
+    private fun stopTrials() {
+        trialRun++
+        recognizer?.destroy()
+        recognizer = null
+        inApp?.destroy()
+        inApp = null
     }
 
     private fun testSystemDialog() {
@@ -199,7 +292,7 @@ class ProbeActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        inApp?.destroy()
+        stopTrials()
         tts?.shutdown()
         scope.cancel()
     }

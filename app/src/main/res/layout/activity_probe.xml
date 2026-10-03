@@ -21,7 +21,14 @@
                 android:id="@+id/btn_probe_listen"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Test in-app listening"
+                android:text="Test listening (5 trials)"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_probe_routes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Test speech routes"
                 android:textSize="12sp" />
 
             <Button
