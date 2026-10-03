@@ -6,11 +6,15 @@ import com.vcorr.claudewatch.core.SpokenText
 import com.vcorr.claudewatch.core.Turn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -105,7 +109,9 @@ object ClaudeApi {
         }
 
         val used = mutableSetOf<String>()
-        repeat(MAX_ROUNDS) {
+        repeat(MAX_ROUNDS) { round ->
+            // Each round's words start a new sentence, never run on from the last round's.
+            if (round > 0) onText(" ")
             val json = post(messages, toolList, apiKey, withSearch, onText)
             val stopReason = json.optString("stop_reason")
             val content = json.getJSONArray("content")
@@ -153,7 +159,7 @@ object ClaudeApi {
         apiKey: String,
         withSearch: Boolean,
         onText: (String) -> Unit,
-    ): JSONObject {
+    ): JSONObject = coroutineScope {
         val body = JSONObject()
             .put("model", MODEL)
             .put("max_tokens", MAX_TOKENS)
@@ -172,6 +178,14 @@ object ClaudeApi {
             // Between streamed events; a search can leave a gap of several seconds.
             readTimeout = 60_000
         }
+        // A blocked read doesn't notice cancellation; dropping the connection ends it at once.
+        val hangUp = launch {
+            try {
+                awaitCancellation()
+            } finally {
+                conn.disconnect()
+            }
+        }
         try {
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
 
@@ -187,6 +201,7 @@ object ClaudeApi {
             val inputs = mutableMapOf<Int, StringBuilder>()
             var stopReason = ""
             var usage = JSONObject()
+            var ended = false
             val reader = conn.inputStream.bufferedReader()
             while (true) {
                 // Stop reading, and drop the connection, as soon as the wearer interrupts.
@@ -199,6 +214,8 @@ object ClaudeApi {
                         val index = event.getInt("index")
                         val block = event.getJSONObject("content_block")
                         blocks[index] = block
+                        // Text after a tool call or search result is a new sentence.
+                        if (block.optString("type") != "text") onText(" ")
                         // A tool call's input arrives as pieces of JSON, put together at the block's end.
                         if (block.optString("type").endsWith("tool_use")) inputs[index] = StringBuilder()
                     }
@@ -228,14 +245,19 @@ object ClaudeApi {
                         event.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { stopReason = it }
                         event.optJSONObject("usage")?.let { usage = it }
                     }
+                    "message_stop" -> ended = true
                     "error" -> error(event.optJSONObject("error")?.optString("message") ?: "The reply stream failed")
                 }
             }
-            return JSONObject()
+            currentCoroutineContext().ensureActive()
+            // A stream that stops before its end is a lost connection, not a short answer.
+            if (!ended) throw IOException("The reply stream ended early")
+            JSONObject()
                 .put("content", JSONArray(blocks.values.toList()))
                 .put("stop_reason", stopReason)
                 .put("usage", usage)
         } finally {
+            hangUp.cancel()
             conn.disconnect()
         }
     }

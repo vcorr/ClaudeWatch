@@ -105,6 +105,8 @@ class MainActivity : Activity() {
     private var requestJob: Job? = null
     private var followUpJob: Job? = null
     private var closeJob: Job? = null
+    // The reply being streamed, if any, so stopping it part-way can keep what was heard.
+    private var liveReply: LiveReply? = null
     private var foreground = false
     private var listenOnLaunch = false
     // Set when the app goes to the background on its own account, so coming back (a double press of
@@ -456,6 +458,7 @@ class MainActivity : Activity() {
                 return@launch
             }
             val live = LiveReply(token, text)
+            liveReply = live
             try {
                 val reply = ClaudeApi.reply(
                     conversation.forRequest(),
@@ -467,6 +470,7 @@ class MainActivity : Activity() {
                     onText = { delta -> runOnUiThread { live.add(delta) } },
                 )
                 if (token != turnToken) return@launch
+                live.complete = true
                 conversation.addAssistant(reply.text)
                 saveChat()
                 shownQuestion = text
@@ -476,10 +480,13 @@ class MainActivity : Activity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: InvalidApiKeyException) {
+                speaker.stop()
                 conversation.dropUnanswered()
                 showSetup("The API key was rejected.")
             } catch (e: Exception) {
                 if (token != turnToken) return@launch
+                // Stop anything half-said, even when the error can't be spoken (screen off).
+                speaker.stop()
                 conversation.dropUnanswered()
                 if (e is IOException) {
                     goIdle("No connection to Claude", problem = true, spoken = "I can't reach Claude right now. Check the watch's connection.")
@@ -527,6 +534,24 @@ class MainActivity : Activity() {
         private var spokenUpTo = 0
         private var started = false
 
+        /** The whole reply has arrived and been recorded. */
+        var complete = false
+
+        /**
+         * Stopped part-way: keep what was said as the answer, so the question isn't lost and a
+         * follow-up ("and tomorrow?") still has its context. Nothing is kept if nothing was said.
+         */
+        fun keepHeard() {
+            if (complete || !started) return
+            complete = true
+            val heard = text.substring(0, spokenUpTo).trim()
+            if (heard.isEmpty()) return
+            conversation.addAssistant(heard)
+            saveChat()
+            shownReply = heard
+            tvReply.text = heard
+        }
+
         fun add(delta: String) {
             if (token != turnToken) return
             text.append(delta)
@@ -570,6 +595,8 @@ class MainActivity : Activity() {
 
     /** Stops whatever is happening: listening, waiting for Claude, or speaking. */
     private fun interrupt(message: String?) {
+        liveReply?.keepHeard()
+        liveReply = null
         turnToken++
         requestJob?.cancel()
         followUpJob?.cancel()

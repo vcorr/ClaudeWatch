@@ -68,7 +68,10 @@ object SpokenText {
                     current.append(text[i])
                 }
                 val spaceFollows = i + 1 < text.length && text[i + 1].isWhitespace()
-                if (spaceFollows && !(c == '.' && endsWithAbbreviation(current))) {
+                // "1." at the start of a list item numbers it; it doesn't end a sentence.
+                val line = current.substring(current.lastIndexOf('\n') + 1).trim()
+                val listNumber = c == '.' && line.dropLast(1).let { it.isNotEmpty() && it.all(Char::isDigit) }
+                if (spaceFollows && !listNumber && !(c == '.' && endsWithAbbreviation(current))) {
                     end = i + 1
                     current.clear()
                 }

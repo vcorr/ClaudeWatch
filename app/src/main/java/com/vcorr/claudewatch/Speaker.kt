@@ -161,8 +161,12 @@ class Speaker(context: Context) {
         }
         holdAudio()
         val id = "u${++counter}"
-        tts.speak(sentence, TextToSpeech.QUEUE_ADD, null, id)
-        lastUtteranceId = id
+        // A refused sentence gets no callback, so it mustn't become the one being waited for.
+        if (tts.speak(sentence, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.SUCCESS) {
+            lastUtteranceId = id
+        } else {
+            finishIfIdle()
+        }
     }
 
     /** The reply is complete: [begin]'s callback runs once the last sentence has been spoken. */

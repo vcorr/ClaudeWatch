@@ -63,4 +63,15 @@ class SpokenTextTest {
     fun completeLengthIncludesClosingQuotes() {
         assertEquals("He said \"stop.\"".length, SpokenText.completeLength("He said \"stop.\" Then"))
     }
+
+    @Test
+    fun completeLengthDoesNotEndAtAListNumber() {
+        val text = "Two options:\n1. Tea is calming.\n2. Coffee"
+        assertEquals("Two options:\n1. Tea is calming.".length, SpokenText.completeLength(text))
+        // And the finished part, cleaned, reads without the number.
+        assertEquals(
+            listOf("Two options: Tea is calming."),
+            SpokenText.sentences(SpokenText.clean(text.substring(0, SpokenText.completeLength(text)))),
+        )
+    }
 }
