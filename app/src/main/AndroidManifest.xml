@@ -17,6 +17,8 @@
         android:maxSdkVersion="35" />
     <!-- Replaces BODY_SENSORS for apps targeting Android 16. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <!-- Steps today, from Health Services' passive feed. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
     <!-- API 30+ hides these from apps that don't declare them; the voice test needs to see them. -->
     <queries>
@@ -48,6 +50,12 @@
         <activity
             android:name=".ProbeActivity"
             android:exported="false" />
+
+        <!-- Only Health Services may bind: it delivers the daily step count here. -->
+        <service
+            android:name=".StepsService"
+            android:exported="true"
+            android:permission="com.google.android.wearable.healthservices.permission.PASSIVE_DATA_BINDING" />
 
     </application>
 

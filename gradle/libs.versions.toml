@@ -3,11 +3,13 @@ agp = "9.4.1"
 kotlin = "2.4.20"
 coroutines = "1.11.0"
 wear = "1.4.0"
+healthServices = "1.1.0"
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-wear = { module = "androidx.wear:wear", version.ref = "wear" }
+androidx-health-services = { module = "androidx.health:health-services-client", version.ref = "healthServices" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

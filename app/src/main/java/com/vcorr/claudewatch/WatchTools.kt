@@ -59,6 +59,7 @@ class WatchTools(private val context: Context) {
         )
         .put(tool("get_watch_status", "The watch's battery level and charging state, its connection, and the next alarm."))
         .put(tool("get_heart_rate", "Measures the wearer's heart rate now with the watch's sensor. Takes up to 20 seconds; the wearer should keep still."))
+        .put(tool("get_steps", "The wearer's step count so far today, as last reported by the watch's sensors, with the time of that report."))
         .put(
             tool(
                 "get_calendar",
@@ -76,6 +77,7 @@ class WatchTools(private val context: Context) {
         "get_weather" -> "Checking the weather"
         "get_watch_status" -> "Checking the watch"
         "get_heart_rate" -> "Measuring your pulse; keep still"
+        "get_steps" -> "Counting your steps"
         "get_calendar" -> "Checking your calendar"
         else -> "Thinking"
     }
@@ -86,6 +88,7 @@ class WatchTools(private val context: Context) {
         "get_weather" -> weather(input.optString("place").takeIf { it.isNotBlank() })
         "get_watch_status" -> status()
         "get_heart_rate" -> heartRate()
+        "get_steps" -> steps()
         "get_calendar" -> calendar(input.optInt("days", 1).coerceIn(1, 7))
         else -> throw ToolException("Unknown tool $name")
     }
@@ -271,6 +274,28 @@ class WatchTools(private val context: Context) {
         }
     }
 
+    // ── Steps ───────────────────────────────────────────────
+
+    private fun steps(): String {
+        if (!granted(Manifest.permission.ACTIVITY_RECOGNITION)) {
+            throw ToolException("Physical activity permission is off for ClaudeWatch. The wearer can allow it in the watch's Settings, under Apps.")
+        }
+        val prefs = context.getSharedPreferences(StepsService.PREFS, Context.MODE_PRIVATE)
+        val at = prefs.getLong(StepsService.KEY_AT, 0)
+        if (at == 0L) {
+            throw ToolException("No step count has arrived yet. The watch sends steps in batches, so the first may take a while after the app is set up.")
+        }
+        val reported = java.util.Calendar.getInstance().apply { timeInMillis = at }
+        val today = java.util.Calendar.getInstance()
+        val sameDay = reported.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+            reported.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
+        if (!sameDay) {
+            return "No steps reported yet today; the last report was on ${SimpleDateFormat("EEEE", Locale.UK).format(Date(at))}."
+        }
+        val steps = prefs.getLong(StepsService.KEY_STEPS, 0)
+        return "$steps steps today, as of ${SimpleDateFormat("HH:mm", Locale.UK).format(Date(at))}."
+    }
+
     // ── Calendar ────────────────────────────────────────────
 
     private suspend fun calendar(days: Int): String = withContext(Dispatchers.IO) {
@@ -364,6 +389,7 @@ class WatchTools(private val context: Context) {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_CALENDAR,
             heartRatePermission(),
+            Manifest.permission.ACTIVITY_RECOGNITION,
         )
 
         private fun tool(name: String, description: String, properties: JSONObject = JSONObject()) = JSONObject()

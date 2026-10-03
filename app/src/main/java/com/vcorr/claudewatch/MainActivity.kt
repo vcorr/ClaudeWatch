@@ -154,6 +154,7 @@ class MainActivity : Activity() {
 
         speaker = Speaker(this)
         watchTools = WatchTools(this)
+        StepsService.register(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
 
         val density = resources.displayMetrics.density
@@ -304,6 +305,8 @@ class MainActivity : Activity() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().apply {
             permissions.forEach { putBoolean("asked:$it", true) }
         }.apply()
+        // The step feed can only start once its permission is granted.
+        StepsService.register(this)
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startListening(followUp = false)
         } else {
