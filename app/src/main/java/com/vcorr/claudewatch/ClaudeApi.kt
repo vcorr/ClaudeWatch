@@ -42,9 +42,9 @@ object ClaudeApi {
             "electricity spot prices, and keeping notes the wearer asks you to remember, " +
             "including places such as where they parked. Use one when the question " +
             "needs it, then give the answer itself rather than describing the tool. When you have asked " +
-            "the Clock app for a timer or alarm, say what you asked it to set. Before sending a " +
-            "reply to a message, say the exact words and who they go to, and send only once the " +
-            "wearer confirms. Use web search only " +
+            "the Clock app for a timer or alarm, say what you asked it to set. To reply to a " +
+            "message, prepare the reply, read back its words and recipient, and send it only once " +
+            "the wearer confirms. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
             "Don't read out web addresses. When asked what you can do, or how this watch app works, " +

@@ -170,6 +170,8 @@ class MainActivity : Activity() {
             beforeLeaving = { leavingForOtherAppUntil = SystemClock.uptimeMillis() + LEAVING_LAPSE_MS }
         }
         StepsService.register(this)
+        // Alarms vanish if the app is force-stopped; setting them again is cheap.
+        Reminders.rescheduleAll(this)
         dialogInput = DialogSpeechInput(this, REQ_DIALOG)
 
         val density = resources.displayMetrics.density

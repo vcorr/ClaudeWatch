@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.AtomicFile
@@ -35,7 +36,10 @@ object Reminders {
     private const val ACTION_FIRE = "com.vcorr.claudewatch.REMINDER"
     private const val ACTION_DND_OFF = "com.vcorr.claudewatch.DND_OFF"
     private const val EXTRA_ID = "id"
-    private const val MAX_REMINDERS = 50
+    const val MAX_REMINDERS = 50
+
+    /** Thrown by [add] when [MAX_REMINDERS] are already set. */
+    class Full : Exception()
     // Request codes for the alarm that ends Do Not Disturb, apart from reminders' ids.
     private const val DND_REQUEST = -1
 
@@ -46,10 +50,10 @@ object Reminders {
     /** Pending reminders, soonest first. Throws if the file can't be read. */
     fun all(context: Context): List<Reminder> = synchronized(LOCK) { read(context).second.sortedBy { it.at } }
 
-    /** Saves and schedules a reminder; null if it couldn't be saved. */
+    /** Saves and schedules a reminder; null if it couldn't be saved; throws [Full] at the limit. */
     fun add(context: Context, text: String, at: Long): Reminder? = synchronized(LOCK) {
         val (nextId, reminders) = runCatching { read(context) }.getOrNull() ?: return null
-        if (reminders.size >= MAX_REMINDERS) return null
+        if (reminders.size >= MAX_REMINDERS) throw Full()
         val reminder = Reminder(nextId, text, at)
         if (!write(context, nextId + 1, reminders + reminder)) return null
         schedule(context, reminder)
@@ -129,13 +133,19 @@ object Reminders {
                 .setContentText(reminder.text)
                 .setStyle(Notification.BigTextStyle().bigText(reminder.text))
                 .setCategory(Notification.CATEGORY_REMINDER)
+                .setWhen(reminder.at)
+                .setShowWhen(true)
                 .setAutoCancel(true)
                 .build()
             nm.notify(NOTIFICATION_TAG, reminder.id, notification)
         } else {
             // Without permission to notify, at least buzz; the wearer can ask Claude what it was.
             Log.d(TAG, "reminder due without notification permission")
-            context.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(VIBRATION, -1))
+            // As an alarm: a buzz of unknown purpose from the background is ignored.
+            context.getSystemService(Vibrator::class.java)?.vibrate(
+                VibrationEffect.createWaveform(VIBRATION, -1),
+                VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
+            )
         }
     }
 
@@ -148,7 +158,14 @@ object Reminders {
         } catch (e: FileNotFoundException) {
             return 1 to emptyList()
         }
-        val root = JSONObject(text)
+        val root = try {
+            JSONObject(text).also { it.getJSONArray("reminders") }
+        } catch (e: org.json.JSONException) {
+            // A damaged list would block reminders for good: keep it aside and start afresh.
+            Log.d(TAG, "reminders file unreadable; set aside")
+            File(context.applicationContext.filesDir, "reminders.json").renameTo(File(context.applicationContext.filesDir, "reminders.damaged.json"))
+            return 1 to emptyList()
+        }
         val array = root.getJSONArray("reminders")
         val reminders = (0 until array.length()).map { i ->
             val o = array.getJSONObject(i)

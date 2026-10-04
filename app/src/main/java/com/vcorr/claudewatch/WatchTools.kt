@@ -141,15 +141,20 @@ class WatchTools(private val context: Context) {
         .put(tool("get_notifications", "The notifications on the watch now, newest first: app, time, title and text, and the last few messages of a conversation. This is how to see the wearer's messages from any app (Signal, WhatsApp, texts, email) and missed calls. Use only when the wearer asks about their notifications or messages, and always check rather than guessing that there are none."))
         .put(
             tool(
-                "reply_to_notification",
-                "Sends a reply through a notification's own reply action, as typing a reply on the watch would, e.g. to a Signal or WhatsApp message. " +
-                    "Only for notifications get_notifications marked \"can reply\", by their number in its latest listing; " +
-                    "tool results aren't kept between turns, so call get_notifications again first in this turn. " +
-                    "Only after reading the exact reply back to the wearer and hearing them confirm it.",
+                "prepare_reply",
+                "Gets a reply to a message ready, without sending it, through the notification's own reply action (as typing a reply on the watch would), e.g. to a Signal or WhatsApp message. " +
+                    "Only for notifications get_notifications marked \"can reply\", by their number in its listing from this turn. " +
+                    "Returns the words and the recipient to read back; send with send_prepared_reply only once the wearer confirms.",
                 JSONObject()
-                    .put("number", JSONObject().put("type", "integer").put("minimum", 1).put("description", "The notification's number in the latest get_notifications listing."))
-                    .put("text", JSONObject().put("type", "string").put("description", "The reply exactly as the wearer confirmed it.")),
+                    .put("number", JSONObject().put("type", "integer").put("minimum", 1).put("description", "The notification's number in this turn's get_notifications listing."))
+                    .put("text", JSONObject().put("type", "string").put("description", "The reply, in the wearer's words.")),
                 required = listOf("number", "text"),
+            )
+        )
+        .put(
+            tool(
+                "send_prepared_reply",
+                "Sends the reply prepare_reply got ready, exactly as read back, to the recipient it named. Only after the wearer has confirmed it; it is kept for three minutes.",
             )
         )
         .put(
@@ -230,7 +235,8 @@ class WatchTools(private val context: Context) {
         "control_media" -> "Pressing the buttons"
         "get_notifications" -> "Reading your notifications"
         "get_now_playing" -> "Seeing what's playing"
-        "reply_to_notification" -> "Sending your reply"
+        "prepare_reply" -> "Getting your reply ready"
+        "send_prepared_reply" -> "Sending your reply"
         "set_do_not_disturb" -> "Changing Do Not Disturb"
         "get_electricity_prices" -> "Checking electricity prices"
         "add_reminder" -> "Setting a reminder"
@@ -258,7 +264,8 @@ class WatchTools(private val context: Context) {
         "control_media" -> media(input.optString("action"), input.optInt("level", -1))
         "get_notifications" -> NotificationsService.describeActive(context) ?: throw notificationAccessOff()
         "get_now_playing" -> NotificationsService.describeNowPlaying(context) ?: throw notificationAccessOff()
-        "reply_to_notification" -> replyTo(input.optInt("number", -1), input.optString("text").trim())
+        "prepare_reply" -> prepareReply(input.optInt("number", -1), input.optString("text").trim())
+        "send_prepared_reply" -> NotificationsService.sendPreparedReply(context) ?: throw notificationAccessOff()
         "set_do_not_disturb" -> doNotDisturb(input.optBoolean("on"), input.optString("until").takeIf { it.isNotBlank() })
         "get_electricity_prices" -> electricityPrices()
         "add_reminder" -> addReminder(
@@ -660,9 +667,9 @@ class WatchTools(private val context: Context) {
 
     // ── Replies and Do Not Disturb ──────────────────────────
 
-    private suspend fun replyTo(number: Int, text: String): String {
+    private suspend fun prepareReply(number: Int, text: String): String {
         if (text.isEmpty()) throw ToolException("There was no reply to send.")
-        return NotificationsService.reply(context, number, text) ?: throw notificationAccessOff()
+        return NotificationsService.prepareReply(context, number, text) ?: throw notificationAccessOff()
     }
 
     private suspend fun doNotDisturb(on: Boolean, until: String?): String {
@@ -703,18 +710,26 @@ class WatchTools(private val context: Context) {
         val current = slots.firstOrNull { it.start <= now }
         val hours = slots.groupBy { Instant.ofEpochMilli(it.start).atZone(zone).truncatedTo(ChronoUnit.HOURS) }
             .map { (hour, list) -> hour to list.map { it.price }.average() }
-        fun label(hour: java.time.ZonedDateTime) =
-            (if (hour.toLocalDate() == LocalDate.now()) "" else "tomorrow ") + "%02d".format(Locale.UK, hour.hour)
-        fun cents(price: Double) = "%.1f".format(Locale.UK, price)
-        val cheapest = hours.minBy { it.second }
-        val dearest = hours.maxBy { it.second }
-        val last = Instant.ofEpochMilli(slots.last().end).atZone(zone)
+        // The day by name past tomorrow: a market day ends at 01:00 Finnish time, so the last
+        // hour can be the night after tomorrow.
+        fun day(at: java.time.ZonedDateTime): String = when (ChronoUnit.DAYS.between(LocalDate.now(), at.toLocalDate())) {
+            0L -> ""
+            1L -> "tomorrow "
+            else -> at.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.UK) + " "
+        }
+        fun label(hour: java.time.ZonedDateTime) = day(hour) + "%02d".format(Locale.UK, hour.hour)
+        fun cents(price: Double) = "%.1f".format(Locale.UK, price + 0.0).replace("-0.0", "0.0")
+        // The hour under way has only its remaining quarters; it doesn't compete for cheapest.
+        val whole = hours.filter { (hour, _) -> hour.toInstant().toEpochMilli() >= now - 60_000 }.ifEmpty { hours }
+        val cheapest = whole.minBy { it.second }
+        val dearest = whole.maxBy { it.second }
+        val last = Instant.ofEpochMilli(slots.last().end + 1).atZone(zone)
         return buildString {
             current?.let { append("Now ${cents(it.price)} c/kWh. ") }
             append("Hourly averages from now (hour: c/kWh): ")
             append(hours.joinToString("; ") { (hour, price) -> "${label(hour)}: ${cents(price)}" })
-            append(". Cheapest hour ${label(cheapest.first)}:00 at ${cents(cheapest.second)}, dearest ${label(dearest.first)}:00 at ${cents(dearest.second)}. ")
-            append("Prices known until ${if (last.toLocalDate() == LocalDate.now()) "" else "tomorrow "}${"%02d:%02d".format(Locale.UK, last.hour, last.minute)}. ")
+            append(". Cheapest whole hour ${label(cheapest.first)}:00 at ${cents(cheapest.second)}, dearest ${label(dearest.first)}:00 at ${cents(dearest.second)}. ")
+            append("Prices known until ${day(last)}${"%02d:%02d".format(Locale.UK, last.hour, last.minute)}. ")
             append("Spot prices include VAT but not the retailer's margin or transmission. Source: porssisahko.net.")
         }
     }
@@ -730,8 +745,13 @@ class WatchTools(private val context: Context) {
             else -> throw ToolException("Say when: a time, or in how many minutes.")
         }
         if (time <= System.currentTimeMillis()) throw ToolException("That time has already passed.")
-        val reminder = withContext(Dispatchers.IO) { Reminders.add(context, text.take(NoteStore.MAX_LENGTH), time) }
-            ?: throw ToolException("The reminder couldn't be saved on the watch (at most 50 at once).")
+        val reminder = withContext(Dispatchers.IO) {
+            try {
+                Reminders.add(context, text.take(NoteStore.MAX_LENGTH), time)
+            } catch (e: Reminders.Full) {
+                throw ToolException("There are already ${Reminders.MAX_REMINDERS} reminders; cancel one first.")
+            }
+        } ?: throw ToolException("The reminder couldn't be saved on the watch.")
         val day = if (isToday(time)) "today" else ukTime("EEEE d MMMM", time)
         return "Reminder ${reminder.id} set for $day at ${ukTime("HH:mm", time)}: $text." + notificationsBlocked()
     }
