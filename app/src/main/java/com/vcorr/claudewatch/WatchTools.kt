@@ -128,7 +128,7 @@ class WatchTools(private val context: Context) {
                 required = listOf("action"),
             )
         )
-        .put(tool("get_notifications", "The notifications on the watch now, newest first: app, time, title and text, and the last few messages of a conversation. Use only when the wearer asks about their notifications or messages."))
+        .put(tool("get_notifications", "The notifications on the watch now, newest first: app, time, title and text, and the last few messages of a conversation. This is how to see the wearer's messages from any app (Signal, WhatsApp, texts, email) and missed calls. Use only when the wearer asks about their notifications or messages, and always check rather than guessing that there are none."))
         .put(tool("get_now_playing", "What is playing on the watch or through it now: the app, title, artist and whether it is playing or paused."))
         .put(tool("get_air_pressure", "Air pressure from the watch's barometer, with the sea-level pressure here now, three hours ago and three hours ahead (a falling trend often means worsening weather), and the watch's altitude estimated from the two."))
         .put(tool("get_compass", "Which way the watch's 12 o'clock edge points, as a compass bearing, read while the wearer holds the watch flat. Useful with recall's directions to a saved place."))

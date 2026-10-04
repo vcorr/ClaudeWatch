@@ -88,19 +88,28 @@ class NotificationsService : NotificationListenerService() {
             } catch (e: Exception) {
                 throw WatchTools.ToolException("The watch wouldn't hand over its notifications just now.")
             }
-            val groupsWithChildren = all.filter { !it.isSummary() }.mapNotNull { it.groupKey }.toSet()
-            val shown = all
-                .filter { it.packageName != context.packageName }
-                .filter { it.notification.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) == 0 }
-                // A group's summary repeats its children; keep it only when it stands alone.
+            val others = all.filter { it.packageName != context.packageName }
+            if (others.isEmpty()) return "There are no notifications on the watch."
+            val groupsWithChildren = others.filter { !it.isSummary() }.mapNotNull { it.groupKey }.toSet()
+            // A service's own running notice isn't news; a group's summary repeats its children
+            // unless it stands alone. Ongoing ones (calls, timers) stay, marked as such.
+            val shown = others
+                .filter { it.notification.flags and Notification.FLAG_FOREGROUND_SERVICE == 0 }
                 .filterNot { it.isSummary() && it.groupKey in groupsWithChildren }
                 .sortedByDescending { it.postTime }
-            if (shown.isEmpty()) return "There are no notifications on the watch."
             val described = shown.mapNotNull { describe(context, it) }
-            if (described.isEmpty()) return "There are no notifications with any text on the watch."
             val lines = described.take(MAX_NOTIFICATIONS)
             val more = described.size - MAX_NOTIFICATIONS
-            return lines.joinToString("\n") + if (more > 0) "\n…and $more older ones." else ""
+            // Say what was left out, by app, so a notification never silently goes missing.
+            val unreadable = shown.filter { describe(context, it) == null }
+            val skipped = if (unreadable.isEmpty()) {
+                ""
+            } else {
+                "\n${unreadable.size} more with no readable text, from " +
+                    unreadable.groupBy { appName(context, it) }.entries.joinToString { (app, list) -> "$app (${list.size})" } + "."
+            }
+            if (lines.isEmpty()) return "No notification on the watch has readable text.$skipped"
+            return lines.joinToString("\n") + (if (more > 0) "\n…and $more older ones." else "") + skipped
         }
 
         private fun StatusBarNotification.isSummary() = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
@@ -113,11 +122,14 @@ class NotificationsService : NotificationListenerService() {
             // An inbox's lines over its summary ("3 new messages"); blank text counts as none.
             val text = messages(extras)
                 ?: extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.joinToString("; ")?.ifBlank { null }
-                ?: listOf(Notification.EXTRA_BIG_TEXT, Notification.EXTRA_TEXT)
+                ?: listOf(Notification.EXTRA_BIG_TEXT, Notification.EXTRA_TEXT, Notification.EXTRA_SUMMARY_TEXT, Notification.EXTRA_SUB_TEXT, Notification.EXTRA_INFO_TEXT)
                     .firstNotNullOfOrNull { extras.getCharSequence(it)?.toString()?.trim()?.ifBlank { null } }
+                // Some notifications carry their words only in the ticker.
+                ?: sbn.notification.tickerText?.toString()?.trim()?.ifBlank { null }
             if (title.isNullOrBlank() && text.isNullOrBlank()) return null
             val app = appName(context, sbn)
-            return "[$app, ${whenPosted(sbn.postTime)}] ${title.orEmpty().take(MAX_FIELD)}" +
+            val ongoing = if (sbn.notification.flags and Notification.FLAG_ONGOING_EVENT != 0) ", ongoing" else ""
+            return "[$app, ${whenPosted(sbn.postTime)}$ongoing] ${title.orEmpty().take(MAX_FIELD)}" +
                 (text?.takeIf { it.isNotBlank() }?.let { ": ${it.take(MAX_FIELD * 2)}" } ?: "")
         }
 
@@ -181,10 +193,30 @@ class NotificationsService : NotificationListenerService() {
         suspend fun describeSources(context: Context): String? {
             val service = runCatching { service(context) }.getOrNull() ?: return null
             val all = runCatching { service.activeNotifications?.toList() }.getOrNull() ?: return null
-            if (all.isEmpty()) return "no notifications now"
-            return all.groupBy { it.packageName }.entries.joinToString("; ") { (pkg, list) ->
-                val named = list.count { it.notification.extras?.getCharSequence(SUBSTITUTE_APP_NAME) != null }
-                "$pkg ×${list.size}" + if (named > 0) " ($named name another app)" else ""
+            if (all.isEmpty()) return "none on the watch now"
+            return all.joinToString("") { sbn ->
+                val n = sbn.notification
+                val extras = n.extras ?: Bundle()
+                val flags = listOfNotNull(
+                    "ongoing".takeIf { n.flags and Notification.FLAG_ONGOING_EVENT != 0 },
+                    "service".takeIf { n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0 },
+                    "summary".takeIf { n.flags and Notification.FLAG_GROUP_SUMMARY != 0 },
+                    "names another app".takeIf { extras.getCharSequence(SUBSTITUTE_APP_NAME) != null },
+                )
+                // Which kinds of text it carries, never the text itself.
+                val parts = listOfNotNull(
+                    "title".takeIf { extras.getCharSequence(Notification.EXTRA_TITLE) != null },
+                    "text".takeIf { extras.getCharSequence(Notification.EXTRA_TEXT) != null },
+                    "big text".takeIf { extras.getCharSequence(Notification.EXTRA_BIG_TEXT) != null },
+                    "lines".takeIf { extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES) != null },
+                    "messages".takeIf { extras.containsKey(Notification.EXTRA_MESSAGES) },
+                    "ticker".takeIf { n.tickerText != null },
+                    "custom view".takeIf { n.contentView != null || n.bigContentView != null },
+                )
+                val read = if (describe(context, sbn) != null) "readable" else "NOT readable"
+                "\n· ${sbn.packageName} (${appName(context, sbn)}), ${ukTime("HH:mm", sbn.postTime)}" +
+                    (if (flags.isEmpty()) "" else ", ${flags.joinToString()}") +
+                    "; has ${parts.ifEmpty { listOf("nothing") }.joinToString()}; $read"
             }
         }
 

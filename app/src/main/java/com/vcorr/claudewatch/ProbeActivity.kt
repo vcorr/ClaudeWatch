@@ -115,7 +115,7 @@ class ProbeActivity : Activity() {
 
         log("— Notifications —")
         log(notificationAccessLine())
-        scope.launch { NotificationsService.describeSources(this@ProbeActivity)?.let { log("Notification sources: $it") } }
+        scope.launch { NotificationsService.describeSources(this@ProbeActivity)?.let { log("Notifications (kinds of text only, no content):$it") } }
 
         log("— Claude round trip —")
         scope.launch {
@@ -335,6 +335,9 @@ class ProbeActivity : Activity() {
     private fun notificationAccess() {
         if (NotificationsService.granted(this)) {
             log("Notification access: granted")
+            scope.launch {
+                log("Notifications (kinds of text only, no content):" + (NotificationsService.describeSources(this@ProbeActivity) ?: " couldn't be read"))
+            }
             return
         }
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
