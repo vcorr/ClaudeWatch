@@ -72,6 +72,13 @@ class WatchTools(private val context: Context) {
 
     /** The tool definitions sent with every request. */
     val definitions: JSONArray = JSONArray()
+        .put(
+            tool(
+                "get_claudewatch_help",
+                "What ClaudeWatch (this app) can do, with example requests, how it is used, its limits, and which features are switched on for this watch now. " +
+                    "Use it when the wearer asks what you can do or how to do something with the watch, or why something doesn't work, rather than guessing.",
+            )
+        )
         .put(tool("get_location", "The wearer's approximate current location from the watch: coordinates and, when available, the place name."))
         .put(
             tool(
@@ -211,6 +218,7 @@ class WatchTools(private val context: Context) {
 
     /** A few words for the screen while a tool runs. */
     fun progress(name: String): String? = when (name) {
+        "get_claudewatch_help" -> "Looking up what I can do"
         "get_location" -> "Finding where you are"
         "get_weather" -> "Checking the weather"
         "get_watch_status" -> "Checking the watch"
@@ -238,6 +246,7 @@ class WatchTools(private val context: Context) {
 
     /** Runs a tool and returns its result as text for Claude. */
     suspend fun run(name: String, input: JSONObject): String = when (name) {
+        "get_claudewatch_help" -> Help.describe(context)
         "get_location" -> location()
         "get_weather" -> weather(input.optString("place").takeIf { it.isNotBlank() })
         "get_watch_status" -> status()

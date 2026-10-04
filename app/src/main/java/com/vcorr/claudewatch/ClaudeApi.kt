@@ -47,7 +47,8 @@ object ClaudeApi {
             "wearer confirms. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
-            "Don't read out web addresses."
+            "Don't read out web addresses. When asked what you can do, or how this watch app works, " +
+            "check get_claudewatch_help and answer briefly with a few examples suited to the question."
 
     // The conversation's language. Tool results and these instructions stay in English; Claude
     // answers in Finnish while the watch can hear and speak it.
