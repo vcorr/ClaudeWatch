@@ -41,6 +41,9 @@ import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
@@ -129,7 +132,51 @@ class WatchTools(private val context: Context) {
             )
         )
         .put(tool("get_notifications", "The notifications on the watch now, newest first: app, time, title and text, and the last few messages of a conversation. This is how to see the wearer's messages from any app (Signal, WhatsApp, texts, email) and missed calls. Use only when the wearer asks about their notifications or messages, and always check rather than guessing that there are none."))
+        .put(
+            tool(
+                "reply_to_notification",
+                "Sends a reply through a notification's own reply action, as typing a reply on the watch would, e.g. to a Signal or WhatsApp message. " +
+                    "Only for notifications get_notifications marked \"can reply\", by their number in its latest listing; " +
+                    "tool results aren't kept between turns, so call get_notifications again first in this turn. " +
+                    "Only after reading the exact reply back to the wearer and hearing them confirm it.",
+                JSONObject()
+                    .put("number", JSONObject().put("type", "integer").put("minimum", 1).put("description", "The notification's number in the latest get_notifications listing."))
+                    .put("text", JSONObject().put("type", "string").put("description", "The reply exactly as the wearer confirmed it.")),
+                required = listOf("number", "text"),
+            )
+        )
+        .put(
+            tool(
+                "set_do_not_disturb",
+                "Turns the watch's Do Not Disturb on (only alarms and priority interruptions get through) or off, optionally until a time.",
+                JSONObject()
+                    .put("on", JSONObject().put("type", "boolean"))
+                    .put("until", JSONObject().put("type", "string").put("description", "When turning on: the local time to turn it off again, HH:MM, the next time the clock shows it.")),
+                required = listOf("on"),
+            )
+        )
         .put(tool("get_now_playing", "What is playing on the watch or through it now: the app, title, artist and whether it is playing or paused."))
+        .put(tool("get_electricity_prices", "Finland's electricity spot prices from now on, in cents per kWh including VAT, as hourly averages with the cheapest and dearest hours, from porssisahko.net. Tomorrow's prices appear in the afternoon."))
+        .put(
+            tool(
+                "add_reminder",
+                "Sets a reminder: at the time, the watch buzzes and shows the text as a notification. Give either at or in_minutes.",
+                JSONObject()
+                    .put("text", JSONObject().put("type", "string").put("description", "What to remind the wearer of, briefly, in their language."))
+                    .put("at", JSONObject().put("type", "string").put("description", "Local date and time, YYYY-MM-DDTHH:MM."))
+                    .put("in_minutes", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 525_600)),
+                required = listOf("text"),
+            )
+        )
+        .put(tool("list_reminders", "The reminders still to come, soonest first, with their ids and times."))
+        .put(
+            tool(
+                "cancel_reminder",
+                "Cancels a reminder by the id list_reminders or add_reminder gave.",
+                JSONObject().put("id", JSONObject().put("type", "integer")),
+                required = listOf("id"),
+            )
+        )
         .put(tool("get_air_pressure", "Air pressure from the watch's barometer, with the sea-level pressure here now, three hours ago and three hours ahead (a falling trend often means worsening weather), and the watch's altitude estimated from the two."))
         .put(tool("get_compass", "Which way the watch's 12 o'clock edge points, as a compass bearing, read while the wearer holds the watch flat. Useful with recall's directions to a saved place."))
         .put(
@@ -175,6 +222,12 @@ class WatchTools(private val context: Context) {
         "control_media" -> "Pressing the buttons"
         "get_notifications" -> "Reading your notifications"
         "get_now_playing" -> "Seeing what's playing"
+        "reply_to_notification" -> "Sending your reply"
+        "set_do_not_disturb" -> "Changing Do Not Disturb"
+        "get_electricity_prices" -> "Checking electricity prices"
+        "add_reminder" -> "Setting a reminder"
+        "list_reminders" -> "Looking at your reminders"
+        "cancel_reminder" -> "Cancelling a reminder"
         "get_air_pressure" -> "Reading the barometer"
         "get_compass" -> "Hold the watch flat"
         "remember" -> "Making a note"
@@ -196,6 +249,16 @@ class WatchTools(private val context: Context) {
         "control_media" -> media(input.optString("action"), input.optInt("level", -1))
         "get_notifications" -> NotificationsService.describeActive(context) ?: throw notificationAccessOff()
         "get_now_playing" -> NotificationsService.describeNowPlaying(context) ?: throw notificationAccessOff()
+        "reply_to_notification" -> replyTo(input.optInt("number", -1), input.optString("text").trim())
+        "set_do_not_disturb" -> doNotDisturb(input.optBoolean("on"), input.optString("until").takeIf { it.isNotBlank() })
+        "get_electricity_prices" -> electricityPrices()
+        "add_reminder" -> addReminder(
+            input.optString("text").trim(),
+            input.optString("at").takeIf { it.isNotBlank() },
+            input.optInt("in_minutes", -1).takeIf { it > 0 },
+        )
+        "list_reminders" -> listReminders()
+        "cancel_reminder" -> cancelReminder(input.optInt("id", -1))
         "get_air_pressure" -> airPressure()
         "get_compass" -> compass()
         "remember" -> remember(input.optString("text").trim(), input.optBoolean("at_current_location"))
@@ -586,6 +649,112 @@ class WatchTools(private val context: Context) {
         return "Media volume is now ${percent(set, max)}%." + if (set == 0) " That is muted, so a spoken reply won't be heard." else ""
     }
 
+    // ── Replies and Do Not Disturb ──────────────────────────
+
+    private suspend fun replyTo(number: Int, text: String): String {
+        if (text.isEmpty()) throw ToolException("There was no reply to send.")
+        return NotificationsService.reply(context, number, text) ?: throw notificationAccessOff()
+    }
+
+    private suspend fun doNotDisturb(on: Boolean, until: String?): String {
+        val end = if (on && until != null) nextTime(until) else null
+        val done = NotificationsService.setDoNotDisturb(context, on) ?: throw notificationAccessOff()
+        if (end != null) {
+            Reminders.scheduleDoNotDisturbEnd(context, end)
+        } else {
+            Reminders.cancelDoNotDisturbEnd(context)
+        }
+        return done + (end?.let { " It turns off at ${ukTime("HH:mm", it)}${if (isToday(it)) "" else " tomorrow"}." } ?: "")
+    }
+
+    /** The next moment the clock shows [hhmm]. */
+    private fun nextTime(hhmm: String): Long {
+        val time = runCatching { LocalTime.parse(hhmm) }.getOrNull() ?: throw ToolException("\"$hhmm\" isn't a time like 07:30.")
+        var at = LocalDate.now().atTime(time)
+        if (!at.isAfter(LocalDateTime.now())) at = at.plusDays(1)
+        return at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    // ── Electricity ─────────────────────────────────────────
+
+    private suspend fun electricityPrices(): String {
+        val json = getJson("https://api.porssisahko.net/v2/latest-prices.json")
+        val array = json.optJSONArray("prices") ?: throw ToolException("The price service answered in an unexpected form.")
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        // Quarter-hour prices from now on, by the local hour they fall in.
+        class Slot(val start: Long, val end: Long, val price: Double)
+        val slots = (0 until array.length()).mapNotNull { i ->
+            val o = array.optJSONObject(i) ?: return@mapNotNull null
+            runCatching {
+                Slot(Instant.parse(o.getString("startDate")).toEpochMilli(), Instant.parse(o.getString("endDate")).toEpochMilli(), o.getDouble("price"))
+            }.getOrNull()
+        }.filter { it.end > now }.sortedBy { it.start }
+        if (slots.isEmpty()) throw ToolException("The price service has no prices from now on.")
+        val current = slots.firstOrNull { it.start <= now }
+        val hours = slots.groupBy { Instant.ofEpochMilli(it.start).atZone(zone).truncatedTo(ChronoUnit.HOURS) }
+            .map { (hour, list) -> hour to list.map { it.price }.average() }
+        fun label(hour: java.time.ZonedDateTime) =
+            (if (hour.toLocalDate() == LocalDate.now()) "" else "tomorrow ") + "%02d".format(Locale.UK, hour.hour)
+        fun cents(price: Double) = "%.1f".format(Locale.UK, price)
+        val cheapest = hours.minBy { it.second }
+        val dearest = hours.maxBy { it.second }
+        val last = Instant.ofEpochMilli(slots.last().end).atZone(zone)
+        return buildString {
+            current?.let { append("Now ${cents(it.price)} c/kWh. ") }
+            append("Hourly averages from now (hour: c/kWh): ")
+            append(hours.joinToString("; ") { (hour, price) -> "${label(hour)}: ${cents(price)}" })
+            append(". Cheapest hour ${label(cheapest.first)}:00 at ${cents(cheapest.second)}, dearest ${label(dearest.first)}:00 at ${cents(dearest.second)}. ")
+            append("Prices known until ${if (last.toLocalDate() == LocalDate.now()) "" else "tomorrow "}${"%02d:%02d".format(Locale.UK, last.hour, last.minute)}. ")
+            append("Spot prices include VAT but not the retailer's margin or transmission. Source: porssisahko.net.")
+        }
+    }
+
+    // ── Reminders ───────────────────────────────────────────
+
+    private suspend fun addReminder(text: String, at: String?, inMinutes: Int?): String {
+        if (text.isEmpty()) throw ToolException("There was nothing to be reminded of.")
+        val time = when {
+            inMinutes != null -> System.currentTimeMillis() + inMinutes * 60_000L
+            at != null -> runCatching { LocalDateTime.parse(at).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull()
+                ?: throw ToolException("\"$at\" isn't a date and time like 2026-10-04T17:00.")
+            else -> throw ToolException("Say when: a time, or in how many minutes.")
+        }
+        if (time <= System.currentTimeMillis()) throw ToolException("That time has already passed.")
+        val reminder = withContext(Dispatchers.IO) { Reminders.add(context, text.take(NoteStore.MAX_LENGTH), time) }
+            ?: throw ToolException("The reminder couldn't be saved on the watch (at most 50 at once).")
+        val day = if (isToday(time)) "today" else ukTime("EEEE d MMMM", time)
+        return "Reminder ${reminder.id} set for $day at ${ukTime("HH:mm", time)}: $text." + notificationsBlocked()
+    }
+
+    private suspend fun listReminders(): String {
+        val pending = withContext(Dispatchers.IO) {
+            try {
+                Reminders.all(context)
+            } catch (e: Exception) {
+                throw ToolException("The reminders on the watch couldn't be read.")
+            }
+        }
+        if (pending.isEmpty()) return "No reminders are set."
+        return pending.joinToString(" ") { r ->
+            val day = if (isToday(r.at)) "today" else ukTime("EEEE d MMMM", r.at)
+            "Reminder ${r.id}, $day at ${ukTime("HH:mm", r.at)}: ${r.text}."
+        }
+    }
+
+    private suspend fun cancelReminder(id: Int): String {
+        val cancelled = withContext(Dispatchers.IO) { Reminders.cancel(context, id) }
+        return if (cancelled) "Reminder $id cancelled." else throw ToolException("There is no reminder $id.")
+    }
+
+    /** A note for Claude if reminders can only buzz, not show their text. */
+    private fun notificationsBlocked(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+            " ClaudeWatch isn't allowed to show notifications, so the watch will only buzz; the wearer can allow notifications for ClaudeWatch in Settings, under Apps."
+        } else {
+            ""
+        }
+
     private fun notificationAccessOff() = ToolException(
         "Notification access is off for ClaudeWatch. It is granted once, from a phone or computer over ADB; " +
             "ClaudeWatch's diagnostics (a long press on the microphone) show how."
@@ -837,7 +1006,7 @@ class WatchTools(private val context: Context) {
             readTimeout = HTTP_READ_TIMEOUT_MS
         }
         try {
-            if (conn.responseCode != 200) throw ToolException("The weather service answered HTTP ${conn.responseCode}.")
+            if (conn.responseCode != 200) throw ToolException("The online service answered HTTP ${conn.responseCode}.")
             JSONObject(conn.inputStream.bufferedReader().readText())
         } finally {
             conn.disconnect()
@@ -864,12 +1033,14 @@ class WatchTools(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) "android.permission.health.READ_HEART_RATE" else Manifest.permission.BODY_SENSORS
 
         /** Everything the tools may need, asked for together with the microphone. */
-        fun permissions(): Array<String> = arrayOf(
+        fun permissions(): Array<String> = listOfNotNull(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_CALENDAR,
             heartRatePermission(),
             Manifest.permission.ACTIVITY_RECOGNITION,
-        )
+            // For reminders to show their text.
+            Manifest.permission.POST_NOTIFICATIONS.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU },
+        ).toTypedArray()
 
         private fun tool(name: String, description: String, properties: JSONObject = JSONObject(), required: List<String> = emptyList()) = JSONObject()
             .put("name", name)

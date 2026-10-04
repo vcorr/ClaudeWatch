@@ -21,6 +21,14 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <!-- Asking the Clock app for timers and alarms; granted at install. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Reminders: on time (granted at install from Android 13), shown as a notification, and
+         set again after a restart. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- API 30+ hides these from apps that don't declare them. The app needs them, not just the
          diagnostics: in-app listening finds its speech services this way, and the speaker
@@ -95,6 +103,20 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- The app's own alarms: reminders falling due, Do Not Disturb ending. -->
+        <receiver
+            android:name=".Reminders$ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Sets reminders again after a restart; the boot broadcast is the system's alone. -->
+        <receiver
+            android:name=".Reminders$BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Only Health Services may bind: it delivers the daily step count here. -->
         <service

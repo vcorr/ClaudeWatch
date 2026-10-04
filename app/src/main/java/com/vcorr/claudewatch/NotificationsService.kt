@@ -3,8 +3,11 @@ package com.vcorr.claudewatch
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.Person
+import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.media.MediaMetadata
@@ -97,9 +100,14 @@ class NotificationsService : NotificationListenerService() {
                 .filter { it.notification.flags and Notification.FLAG_FOREGROUND_SERVICE == 0 }
                 .filterNot { it.isSummary() && it.groupKey in groupsWithChildren }
                 .sortedByDescending { it.postTime }
-            val described = shown.mapNotNull { describe(context, it) }
-            val lines = described.take(MAX_NOTIFICATIONS)
-            val more = described.size - MAX_NOTIFICATIONS
+            val readable = shown.mapNotNull { sbn -> describe(context, sbn)?.let { sbn to it } }
+            // Numbered, so Claude can name one to reply to; the numbers hold until the next listing.
+            val numbered = readable.take(MAX_NOTIFICATIONS)
+            listed = numbered.mapIndexed { i, (sbn, _) -> i + 1 to sbn.key }.toMap()
+            val lines = numbered.mapIndexed { i, (sbn, line) ->
+                "${i + 1}. " + line + if (replyAction(sbn.notification) != null) " (can reply)" else ""
+            }
+            val more = readable.size - MAX_NOTIFICATIONS
             // Say what was left out, by app, so a notification never silently goes missing.
             val unreadable = shown.filter { describe(context, it) == null }
             val skipped = if (unreadable.isEmpty()) {
@@ -110,6 +118,55 @@ class NotificationsService : NotificationListenerService() {
             }
             if (lines.isEmpty()) return "No notification on the watch has readable text.$skipped"
             return lines.joinToString("\n") + (if (more > 0) "\n…and $more older ones." else "") + skipped
+        }
+
+        // The keys of the notifications last listed, by the number Claude saw.
+        @Volatile
+        private var listed: Map<Int, String> = emptyMap()
+
+        /** The action a notification offers for typing a reply, if any, the phone's or the watch's. */
+        private fun replyAction(notification: Notification): Notification.Action? {
+            val actions = notification.actions.orEmpty().toList() +
+                runCatching { Notification.WearableExtender(notification).actions }.getOrNull().orEmpty()
+            val replies = actions.filter { action -> action.remoteInputs.orEmpty().any { it.allowFreeFormInput } }
+            return replies.firstOrNull { it.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY } ?: replies.firstOrNull()
+        }
+
+        /**
+         * Sends [text] as the reply to notification [number] from the last listing, through the
+         * notification's own reply action, as typing a reply on the watch would. Null without access.
+         */
+        suspend fun reply(context: Context, number: Int, text: String): String? {
+            val service = service(context) ?: return null
+            val key = listed[number]
+                ?: throw WatchTools.ToolException("There is no notification $number; read the notifications first.")
+            val sbn = runCatching { service.getActiveNotifications(arrayOf(key))?.firstOrNull() }.getOrNull()
+                ?: throw WatchTools.ToolException("That notification has gone; it may have been read or dismissed.")
+            val action = replyAction(sbn.notification)
+                ?: throw WatchTools.ToolException("That notification can't be replied to from the watch.")
+            val inputs = action.remoteInputs.orEmpty().filter { it.allowFreeFormInput }.toTypedArray()
+            val fillIn = Intent()
+            val results = android.os.Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
+            RemoteInput.addResultsToIntent(inputs, fillIn, results)
+            RemoteInput.setResultsSource(fillIn, RemoteInput.SOURCE_FREE_FORM_INPUT)
+            try {
+                action.actionIntent.send(context, 0, fillIn)
+            } catch (e: PendingIntent.CanceledException) {
+                throw WatchTools.ToolException("The app no longer accepts replies to that notification.")
+            }
+            return "Reply sent to the ${appName(context, sbn)} conversation \"${sbn.notification.extras?.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE) ?: sbn.notification.extras?.getCharSequence(Notification.EXTRA_TITLE) ?: ""}\"."
+        }
+
+        /**
+         * Turns Do Not Disturb on (alarms and priority interruptions only) or off. Android 15 and
+         * later apply this as the app's own Do Not Disturb rule. Null without access.
+         */
+        suspend fun setDoNotDisturb(context: Context, on: Boolean): String? {
+            val service = service(context) ?: return null
+            service.requestInterruptionFilter(
+                if (on) NotificationListenerService.INTERRUPTION_FILTER_PRIORITY else NotificationListenerService.INTERRUPTION_FILTER_ALL
+            )
+            return if (on) "Asked the watch to turn on Do Not Disturb." else "Asked the watch to turn off Do Not Disturb."
         }
 
         private fun StatusBarNotification.isSummary() = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
