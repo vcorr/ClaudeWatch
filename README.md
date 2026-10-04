@@ -1,40 +1,82 @@
 # ClaudeWatch
 
-A Claude voice chat for Wear OS, built for a Samsung Galaxy Watch. Work in progress: see [`docs/PLAN.md`](docs/PLAN.md).
+Voice chat with Claude (Haiku 4.5) on a Samsung Galaxy Watch. Open it, speak, and Claude answers aloud. It can also read the watch, act on it, and look a few things up. One user, sideloaded, using your own Anthropic API key. Plans and decisions are in [`docs/PLAN.md`](docs/PLAN.md).
 
-The app needs your own Anthropic API key. The key is **never** built into the app; you give it to the watch once, from the phone's browser (or over adb from a computer).
+## What you can ask
 
-## Install from the phone (no computer)
+| | For example | Needs |
+|---|---|---|
+| Conversation | "Explain…", "Translate…", follow-up questions | — |
+| Weather | "Will it rain this afternoon?", "Weather in Oulu tomorrow" | Location |
+| Where you are | "Where am I?" | Location |
+| Watch | "How's my battery?", "When's my next alarm?" | — |
+| Heart rate | "What's my pulse?" (measured now; keep still) | Heart rate |
+| Activity | "How far have I walked today?" (steps, distance, calories, floors) | Physical activity |
+| Calendar | "What's on tomorrow?" (up to a week ahead) | Calendar |
+| Timers and alarms | "Ten-minute timer", "Wake me at 6:30" (in the Clock app) | — |
+| Reminders | "Remind me at five to ring Mum"; list and cancel them | Notifications |
+| Music | "Pause", "Next song", "Volume to 30%", "What's playing?" | — (what's playing: notification access) |
+| Messages | "Any messages?", "Reply to Anna: on my way" (read back, sent only when you confirm) | Notification access |
+| Do Not Disturb | "Silence the watch until seven" | Notification access |
+| Notes | "Remember I parked on level 3, here"; later "How far is my car?" | Location, if saving the place |
+| Compass and barometer | "Which way is north?", "What's the air pressure doing?", "How high up am I?" | — |
+| Electricity | "When is electricity cheapest tonight?" (Finnish spot prices, c/kWh incl. VAT) | — |
+| Web search | "Look up…" (only when you ask) | — |
+| Help | "What can you do?", "Why can't you read my messages?" | — |
 
-1. **Watch:** Settings → About watch → Software information, tap **Software version** five times. Then **Settings → Developer options**: turn on **ADB debugging** and **Wireless debugging**. Put the watch on the same Wi-Fi as the phone.
-2. **Phone:** in the browser, signed in to GitHub, open the latest successful run on the [Actions page](https://github.com/vcorr/ClaudeWatch/actions), download the `ClaudeWatch-0.4.N` file listed under *Artifacts* (N is the build number) and unzip it with My Files.
-3. Install a phone ADB app such as **Bugjaeger** or **Wear Installer 2**. Connect it to the watch's IP address (shown under Wireless debugging), pair with the code the watch shows, tap *Always allow* on the watch, and install `ClaudeWatch-0.4.N.apk` *through that app*. Tapping the APK in My Files won't work: it is a watch app, so the phone refuses it. Installs over ADB are exempt from Google's unverified-developer block, so there's no waiting period.
-4. **Key:** open ClaudeWatch on the watch. With no key set, it shows an address such as `http://192.168.1.23:8080` and a six-digit PIN. Open that address in the phone's browser, paste the API key and the PIN, and tap **Save to watch**. The watch confirms, the page says you can close it, and the watch stops serving it.
-5. Opening the app starts listening, over your watch face: speak, and Claude answers out loud as the reply streams in, then listens for a follow-up while a ring around the microphone runs down. While it listens, **tap to send** what it heard or **hold to cancel**; while it talks, **tap anywhere to stop** it. Said nothing? It closes itself after a few seconds, as does a conversation that has ended; touch the screen to keep it open. Reopened within 30 minutes, it carries on the same chat; **New** starts afresh. **Long-press the microphone** for the build version and voice diagnostics.
-6. **Quick start:** on the watch, Settings → Advanced features → Customise buttons → Double press → ClaudeWatch. A double press of the Home key then opens it listening. Or add the **ClaudeWatch** tile (long-press the watch face's tiles, then +) and tap **Talk**.
-7. **Language:** conversations are in Finnish when the watch can both hear and speak Finnish, otherwise in English, decided afresh each time the app starts. If it falls back to English, check that a Finnish voice is installed (Settings → General → Text-to-speech, or Google's Speech Recognition and Synthesis). The diagnostics list each engine's English and Finnish voices (stored, online, to download), and Test speaking shows which voice the app chose and why the conversation is in the language it is.
-8. On first use the watch asks for permissions: the microphone, plus location, calendar, heart rate and physical activity for Claude's watch tools (weather, where you are, your calendar, your pulse and activity today, the battery and the next alarm). Each is asked for once and read only when a question needs it. Without any permission Claude can also set timers and alarms in the Clock app, play, pause and skip music and set the volume, read the barometer (pressure trend and altitude) and the compass, and keep notes you ask it to remember, with the place if you like ("remember where I parked"); notes stay on the watch. Web search, which is paid per search, runs only when you ask Claude to look something up.
-9. **Notifications (optional):** for Claude to read your notifications ("anything from Anna?") and see what's playing, grant notification access once. In Bugjaeger's shell (or `adb shell` from a computer), run `cmd notification allow_listener com.vcorr.claudewatch/com.vcorr.claudewatch.NotificationsService`. The diagnostics' **Notification access** button shows the same command and whether access is on. A reinstall removes the grant, so run it again after each new build. Claude reads notifications only when you ask about them; their text then goes to Anthropic with your question, and nothing is stored. The same access lets Claude reply to a message through the notification's own reply action ("reply to Anna: on my way"; it reads the reply back and sends it only when you confirm) and turn Do Not Disturb on or off, optionally until a time.
-10. **Reminders and electricity:** "remind me at five to ring Mum" sets a reminder that buzzes and shows its text as a notification (allow notifications when asked; reminders survive a restart). "When is electricity cheapest tonight?" reads Finland's spot prices from porssisahko.net (cents per kWh including VAT, hourly averages; no key needed).
+Conversations are in Finnish if the watch can both recognise and speak Finnish, otherwise in English.
 
-The key page exists only while the watch shows it, needs the PIN, and stops after five wrong PINs. It travels over your local Wi-Fi unencrypted, so use it on your home network, not on public Wi-Fi. If Claude ever rejects the key, the watch shows the page again.
+## Using it
 
-If an update fails to install with a signature error, uninstall the old version first (on the watch, or `adb uninstall com.vcorr.claudewatch`) and set the key again. Until builds use a fixed signing key, every new build needs this.
+- **Open:** the app, its **Talk** tile, or a button shortcut (Settings → Advanced features → Customise buttons → Double press → ClaudeWatch). It starts listening straight away.
+- **While listening:** tap to send, hold to cancel. **While Claude talks:** tap anywhere to stop.
+- After a reply it listens briefly for a follow-up, then closes itself.
+- A chat is remembered for 30 minutes. **New** starts afresh; **Type** is for typing.
+- **Long-press the microphone** for diagnostics: version, speech and voice checks, notification access, an API round trip.
 
-## Install from a Mac
+## Install
 
-1. `brew install android-platform-tools`
-2. Enable developer options, ADB debugging and Wireless debugging on the watch as above.
-3. Under **Wireless debugging → Pair new device**:
-   ```sh
-   adb pair <watch-ip>:<pairing-port>      # enter the pairing code
-   adb connect <watch-ip>:<debug-port>     # the port shown on the Wireless debugging screen
-   adb install -r ClaudeWatch-0.4.N.apk
-   ```
-4. Or set the key from the Mac instead of the browser page. Copy the key so it is on the clipboard, then:
-   ```sh
-   pbpaste > key.txt
-   adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'" < key.txt
-   rm key.txt
-   ```
-   The outer double quotes matter, because `adb shell` re-parses its arguments on the watch.
+You need developer options on the watch and an ADB app on the phone (Bugjaeger or Wear Installer 2).
+
+1. **Watch:** Settings → About watch → Software information, tap **Software version** five times. In **Developer options**, turn on **ADB debugging** and **Wireless debugging**. Use the same Wi-Fi as the phone.
+2. **Phone:** from the latest green run on the [Actions page](https://github.com/vcorr/ClaudeWatch/actions), download `ClaudeWatch-0.4.N` and unzip it.
+3. In the ADB app, pair with the watch, then install the APK through the app. A phone can't install a watch APK directly.
+4. **API key:** open ClaudeWatch. It shows an address and a PIN; open the address in the phone's browser, paste the key and PIN, and tap **Save to watch**.
+5. Allow the permissions it asks for on first use. Each feature uses only its own permission, only when asked.
+
+Each build has a new signing key, so **uninstall the old version before installing a new one**, then set the key again.
+
+### Notification access (optional)
+
+Needed for messages, replies, Do Not Disturb and what's playing. Android doesn't let sideloaded apps switch this on in Settings, so grant it once per install in the ADB app's shell:
+
+```sh
+cmd notification allow_listener com.vcorr.claudewatch/com.vcorr.claudewatch.NotificationsService
+```
+
+### From a Mac instead
+
+```sh
+brew install android-platform-tools
+adb pair <watch-ip>:<pairing-port>
+adb connect <watch-ip>:<debug-port>
+adb install ClaudeWatch-0.4.N.apk
+```
+
+## Privacy and cost
+
+- Your questions, and any watch data a question needs (location, a notification's text, your pulse), go to Anthropic's API. Weather and pressure lookups send approximate coordinates to Open-Meteo; electricity prices send nothing about you; place names come from the watch's own geocoder.
+- Notes, reminders and the 30-minute chat stay in the app's private storage, excluded from backups. Nothing is logged with content.
+- The key is never built into the app. The setup page exists only while the watch shows it, needs the PIN, locks after five wrong tries, and is unencrypted on your Wi-Fi, so set it up at home.
+- You pay Anthropic per use. Web search costs extra ($10 per 1,000 searches, per [Anthropic's docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)), so it runs only when asked. Setting a monthly spending limit in the Anthropic Console is wise.
+
+## Limits
+
+- No calls or texts: the watch has no mobile plan. Messages are answered through apps' notifications.
+- No Samsung Health history (sleep, blood oxygen, ECG): those stay in Samsung's apps.
+- No system settings such as Wi-Fi or Bluetooth.
+- Speech recognition and most features need a connection, through the phone, Wi-Fi or LTE.
+
+## Building
+
+There is no local build. GitHub Actions builds every push and attaches the APK; `:core` holds the plain-Kotlin parts and their tests. Background reading is in [`docs/RESEARCH.md`](docs/RESEARCH.md).

@@ -23,7 +23,7 @@
   - PowerShell: `Get-Content key.txt | adb shell "run-as com.vcorr.claudewatch sh -c 'mkdir -p files && cat > files/api_key'"`
   - then delete `key.txt`.
   
-  The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. The owner uses a Mac, so the macOS line applies; the README gives the full steps.
+  The outer double quotes matter: `adb shell` joins its arguments and re-parses them on the watch, so without them the inner quotes are lost. Debug builds allow `run-as`; there is no exported entry point, and the key never appears on a command line. The owner uses a Mac, so the macOS line applies; the README covers installing.
 - `android:allowBackup="false"`. Never log the key, request headers, prompts or replies.
 
 *Device checklist:* uninstall the old build (CI still signs with a random key until Phase 2a, so every install until then needs an uninstall and the key provisioned again); install; provision the key; a typed question still gets an answer.
