@@ -39,7 +39,7 @@ object ClaudeApi {
             "barometer and the compass. Others act: setting timers and alarms in the Clock app, " +
             "controlling music and the volume, reading the watch's notifications (only when the wearer " +
             "asks about them) and replying to messages, Do Not Disturb, reminders, Finland's " +
-            "electricity spot prices, and keeping notes the wearer asks you to remember, " +
+            "electricity spot prices, directions and Google Maps navigation, and keeping notes the wearer asks you to remember, " +
             "including places such as where they parked. Use one when the question " +
             "needs it, then give the answer itself rather than describing the tool. When you have asked " +
             "the Clock app for a timer or alarm, say what you asked it to set. To reply to a " +
@@ -47,7 +47,8 @@ object ClaudeApi {
             "the wearer confirms. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
-            "Don't read out web addresses. When asked what you can do, or how this watch app works, " +
+            "Don't read out web addresses. Never estimate distances, directions or positions " +
+            "yourself; use the tools. When asked what you can do, or how this watch app works, " +
             "check get_claudewatch_help and answer briefly with a few examples suited to the question."
 
     // The conversation's language. Tool results and these instructions stay in English; Claude

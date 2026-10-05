@@ -18,6 +18,8 @@ Voice chat with Claude (Haiku 4.5) on a Samsung Galaxy Watch. Open it, speak, an
 | Music | "Pause", "Next song", "Volume to 30%", "What's playing?" | — (what's playing: notification access) |
 | Messages | "Any messages?", "Reply to Anna: on my way" (read back, sent only when you confirm) | Notification access |
 | Do Not Disturb | "Silence the watch until seven" | Notification access |
+| Directions | "How far is Tampere, and which way?" (as the crow flies) | Location |
+| Navigation | "Walk me to the station", "Take me back to the car" (opens Google Maps) | Location |
 | Notes | "Remember I parked on level 3, here"; later "How far is my car?" | Location, if saving the place |
 | Compass and barometer | "Which way is north?", "What's the air pressure doing?", "How high up am I?" | — |
 | Electricity | "When is electricity cheapest tonight?" (Finnish spot prices, c/kWh incl. VAT) | — |
@@ -65,7 +67,7 @@ adb install ClaudeWatch-0.4.N.apk
 
 ## Privacy and cost
 
-- Your questions, and any watch data a question needs (location, a notification's text, your pulse), go to Anthropic's API. Weather and pressure lookups send approximate coordinates to Open-Meteo; electricity prices send nothing about you; place names come from the watch's own geocoder.
+- Your questions, and any watch data a question needs (location, a notification's text, your pulse), go to Anthropic's API. Weather and pressure lookups send approximate coordinates to Open-Meteo; a destination you name is looked up with OpenStreetMap's Nominatim; electricity prices send nothing about you; place names come from the watch's own geocoder.
 - Notes, reminders and the 30-minute chat stay in the app's private storage, excluded from backups. Nothing is logged with content.
 - The key is never built into the app. The setup page exists only while the watch shows it, needs the PIN, locks after five wrong tries, and is unencrypted on your Wi-Fi, so set it up at home.
 - You pay Anthropic per use. Web search costs extra ($10 per 1,000 searches, per [Anthropic's docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)), so it runs only when asked. Setting a monthly spending limit in the Anthropic Console is wise.

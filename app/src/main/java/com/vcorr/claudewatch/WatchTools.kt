@@ -189,6 +189,26 @@ class WatchTools(private val context: Context) {
                 required = listOf("id"),
             )
         )
+        .put(
+            tool(
+                "get_directions",
+                "How far and in which compass direction a place is from the wearer, as the crow flies (not by road). " +
+                    "Always use this rather than estimating distances or directions yourself. For which way to turn, also call get_compass and compare the bearings.",
+                JSONObject()
+                    .put("destination", JSONObject().put("type", "string").put("description", "A town, address or named place, e.g. \"Tampere\" or \"Hämeenkatu 10, Tampere\"."))
+                    .put("note_id", JSONObject().put("type", "integer").put("description", "Instead of a destination: a saved note's id, for the place saved with it.")),
+            )
+        )
+        .put(
+            tool(
+                "start_navigation",
+                "Opens turn-by-turn navigation in Google Maps on the watch, from where the wearer is. The watch then shows Maps instead of ClaudeWatch.",
+                JSONObject()
+                    .put("destination", JSONObject().put("type", "string").put("description", "A town, address or named place."))
+                    .put("note_id", JSONObject().put("type", "integer").put("description", "Instead of a destination: a saved note's id, to navigate to the place saved with it."))
+                    .put("mode", JSONObject().put("type", "string").put("enum", JSONArray(listOf("walk", "bicycle", "drive"))).put("description", "Walking if the wearer didn't say.")),
+            )
+        )
         .put(tool("get_air_pressure", "Air pressure from the watch's barometer, with the sea-level pressure here now, three hours ago and three hours ahead (a falling trend often means worsening weather), and the watch's altitude estimated from the two."))
         .put(tool("get_compass", "Which way the watch's 12 o'clock edge points, as a compass bearing, read while the wearer holds the watch flat. Useful with recall's directions to a saved place."))
         .put(
@@ -243,6 +263,8 @@ class WatchTools(private val context: Context) {
         "list_reminders" -> "Looking at your reminders"
         "cancel_reminder" -> "Cancelling a reminder"
         "get_air_pressure" -> "Reading the barometer"
+        "get_directions" -> "Working out the way"
+        "start_navigation" -> "Opening Maps"
         "get_compass" -> "Hold the watch flat"
         "remember" -> "Making a note"
         "recall" -> "Looking at your notes"
@@ -276,6 +298,12 @@ class WatchTools(private val context: Context) {
         "list_reminders" -> listReminders()
         "cancel_reminder" -> cancelReminder(input.optInt("id", -1))
         "get_air_pressure" -> airPressure()
+        "get_directions" -> directions(input.optString("destination").trim().takeIf { it.isNotEmpty() }, input.optInt("note_id", -1).takeIf { it > 0 })
+        "start_navigation" -> navigate(
+            input.optString("destination").trim().takeIf { it.isNotEmpty() },
+            input.optInt("note_id", -1).takeIf { it > 0 },
+            input.optString("mode", "walk"),
+        )
         "get_compass" -> compass()
         "remember" -> remember(input.optString("text").trim(), input.optBoolean("at_current_location"))
         "recall" -> recall(input.optBoolean("with_directions"))
@@ -905,6 +933,101 @@ class WatchTools(private val context: Context) {
     private fun isFlat(orientation: FloatArray) =
         abs(Math.toDegrees(orientation[1].toDouble())) <= FLAT_DEGREES && abs(Math.toDegrees(orientation[2].toDouble())) <= FLAT_DEGREES
 
+    // ── Directions and navigation ───────────────────────────
+
+    /** A place to go: its coordinates and a name to say. */
+    private class Place(val latitude: Double, val longitude: Double, val name: String)
+
+    private suspend fun destination(query: String?, noteId: Int?, near: Location?): Place = when {
+        noteId != null -> {
+            val note = withContext(Dispatchers.IO) { runCatching { notes.all() }.getOrNull() }?.firstOrNull { it.id == noteId }
+                ?: throw ToolException("There is no note $noteId.")
+            val lat = note.latitude
+            val lon = note.longitude
+            if (lat == null || lon == null) throw ToolException("Note $noteId was saved without a place.")
+            Place(lat, lon, "the place saved with note $noteId (${note.text})")
+        }
+        query != null -> findPlace(query, near)
+        else -> throw ToolException("Say where to: a place, or a saved note.")
+    }
+
+    /**
+     * Finds a place by name or address with OpenStreetMap's Nominatim, preferring results near
+     * the wearer; towns and cities fall back to Open-Meteo's place search.
+     */
+    private suspend fun findPlace(query: String, near: Location?): Place {
+        val nearby = near?.let {
+            // A box of about ±1° around the wearer, preferred but not required.
+            "&viewbox=${it.longitude - 1},${it.latitude + 0.5},${it.longitude + 1},${it.latitude - 0.5}"
+        } ?: ""
+        val hit = orNull {
+            getJsonArray(
+                "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" +
+                    URLEncoder.encode(query, "UTF-8") + nearby
+            ).optJSONObject(0)
+        }
+        if (hit != null) {
+            return Place(hit.getString("lat").toDouble(), hit.getString("lon").toDouble(), hit.optString("display_name").split(", ").take(3).joinToString(", "))
+        }
+        val (lat, lon, name) = geocode(query)
+        return Place(lat, lon, name)
+    }
+
+    private suspend fun directions(query: String?, noteId: Int?): String {
+        val here = currentLocation()
+        val place = destination(query, noteId, here)
+        val result = FloatArray(2)
+        Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, result)
+        val bearing = ((result[1] % 360 + 360) % 360).roundToInt() % 360
+        return "${place.name} is ${distance(result[0])} away as the crow flies, bearing $bearing° from true north " +
+            "(${compassPoint(bearing)}) from the wearer. By road it is further. Source: the watch's location" +
+            (if (noteId == null) " and OpenStreetMap." else ".")
+    }
+
+    private suspend fun navigate(query: String?, noteId: Int?, mode: String): String {
+        val code = when (mode) {
+            "bicycle" -> "b"
+            "drive" -> "d"
+            else -> "w"
+        }
+        // A saved place goes as exact coordinates; a name goes to Maps as it is, for Maps to find.
+        val target = if (noteId != null) {
+            val place = destination(null, noteId, null)
+            "${place.latitude},${place.longitude}"
+        } else {
+            query ?: throw ToolException("Say where to: a place, or a saved note.")
+        }
+        val uri = Uri.parse("google.navigation:q=" + Uri.encode(target) + "&mode=" + code)
+        if (!onScreen()) throw ToolException("The watch screen went off before Maps could be opened; try again with the screen on.")
+        withContext(Dispatchers.Main) {
+            beforeLeaving?.invoke()
+            val maps = Intent(Intent.ACTION_VIEW, uri).setPackage(GOOGLE_MAPS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(maps)
+            } catch (e: ActivityNotFoundException) {
+                // Another navigation app, or a map showing the place, rather than nothing.
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (noNavigation: ActivityNotFoundException) {
+                    try {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(target))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (noMaps: ActivityNotFoundException) {
+                        throw ToolException("No maps app on this watch accepts navigation requests; Google Maps can be installed from the watch's Play Store.")
+                    }
+                }
+            }
+        }
+        val how = when (code) {
+            "b" -> "cycling"
+            "d" -> "driving"
+            else -> "walking"
+        }
+        return "Asked Google Maps to start $how navigation to ${if (noteId != null) "the place saved with note $noteId" else target}. " +
+            "Maps now shows on the watch; if it found the wrong place, the wearer can change it there."
+    }
+
     // ── Notes ───────────────────────────────────────────────
 
     private suspend fun remember(text: String, atLocation: Boolean): String {
@@ -1029,6 +1152,21 @@ class WatchTools(private val context: Context) {
         }
     }
 
+    /** A JSON list from [url]; Nominatim asks every app to name itself in the User-Agent. */
+    private suspend fun getJsonArray(url: String): JSONArray = withContext(Dispatchers.IO) {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+            readTimeout = HTTP_READ_TIMEOUT_MS
+            setRequestProperty("User-Agent", "ClaudeWatch/1 (personal Wear OS app)")
+        }
+        try {
+            if (conn.responseCode != 200) throw ToolException("The place search answered HTTP ${conn.responseCode}.")
+            JSONArray(conn.inputStream.bufferedReader().readText())
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = HTTP_CONNECT_TIMEOUT_MS
@@ -1052,6 +1190,7 @@ class WatchTools(private val context: Context) {
         private const val COMPASS_MAX_ERROR_DEGREES = 20
         private const val FLAT_DEGREES = 30
         private const val MEDIA_SETTLE_MS = 700L
+        private const val GOOGLE_MAPS = "com.google.android.apps.maps"
         private const val RECENT_LOCATION_MS = 30 * 60 * 1000L
         private const val MAX_EVENTS = 15
         private const val HTTP_CONNECT_TIMEOUT_MS = 10_000
