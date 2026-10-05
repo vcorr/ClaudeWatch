@@ -11,6 +11,8 @@
 
     <!-- Watch tools Claude can call: location and weather, calendar, heart rate. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Precise location for directions and saved places such as a parked car. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission
         android:name="android.permission.BODY_SENSORS"
@@ -42,6 +44,16 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- Navigation: which app, if any, takes a navigation request or shows a place. -->
+        <package android:name="com.google.android.apps.maps" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="google.navigation" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
         </intent>
         <!-- Apps' names, for saying which app a notification or the music is from. -->
         <intent>

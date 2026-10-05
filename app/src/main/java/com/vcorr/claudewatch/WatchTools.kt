@@ -31,6 +31,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
@@ -66,6 +67,10 @@ class WatchTools(private val context: Context) {
 
     /** Runs on the main thread just before another app's screen may open, e.g. the Clock's. */
     var beforeLeaving: (() -> Unit)? = null
+
+    /** Another app's screen to open once the reply has been spoken, such as Maps' navigation. */
+    @Volatile
+    var pendingLaunch: Intent? = null
 
     /** A tool failed in a way Claude should hear about and explain, such as a missing permission. */
     class ToolException(message: String) : Exception(message)
@@ -202,7 +207,7 @@ class WatchTools(private val context: Context) {
         .put(
             tool(
                 "start_navigation",
-                "Opens turn-by-turn navigation in Google Maps on the watch, from where the wearer is. The watch then shows Maps instead of ClaudeWatch.",
+                "Opens turn-by-turn navigation in Google Maps on the watch, from where the wearer is, once your reply has been spoken; the watch then shows Maps. Only when the wearer asks to be guided or navigated somewhere.",
                 JSONObject()
                     .put("destination", JSONObject().put("type", "string").put("description", "A town, address or named place."))
                     .put("note_id", JSONObject().put("type", "integer").put("description", "Instead of a destination: a saved note's id, to navigate to the place saved with it."))
@@ -938,6 +943,10 @@ class WatchTools(private val context: Context) {
     /** A place to go: its coordinates and a name to say. */
     private class Place(val latitude: Double, val longitude: Double, val name: String)
 
+    private val placeCache = java.util.concurrent.ConcurrentHashMap<String, Place>()
+    private val nominatimLock = kotlinx.coroutines.sync.Mutex()
+    private var lastNominatim = 0L
+
     private suspend fun destination(query: String?, noteId: Int?, near: Location?): Place = when {
         noteId != null -> {
             val note = withContext(Dispatchers.IO) { runCatching { notes.all() }.getOrNull() }?.firstOrNull { it.id == noteId }
@@ -956,19 +965,20 @@ class WatchTools(private val context: Context) {
      * the wearer; towns and cities fall back to Open-Meteo's place search.
      */
     private suspend fun findPlace(query: String, near: Location?): Place {
+        // A box of about 110 km around the wearer, preferred but not required; its centre is
+        // rounded to a tenth of a degree, so OpenStreetMap learns only the area.
         val nearby = near?.let {
-            // A box of about ±1° around the wearer, preferred but not required.
-            "&viewbox=${it.longitude - 1},${it.latitude + 0.5},${it.longitude + 1},${it.latitude - 0.5}"
+            val lat = Math.round(it.latitude * 10) / 10.0
+            val lon = Math.round(it.longitude * 10) / 10.0
+            "&viewbox=" + "%.1f,%.1f,%.1f,%.1f".format(Locale.US, lon - 1, lat + 0.5, lon + 1, lat - 0.5)
         } ?: ""
-        val hit = orNull {
-            getJsonArray(
-                "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" +
-                    URLEncoder.encode(query, "UTF-8") + nearby
-            ).optJSONObject(0)
+        val url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" +
+            URLEncoder.encode(query, "UTF-8") + nearby
+        val hit = placeCache[url] ?: orNull { nominatim(url).optJSONObject(0) }?.let { found ->
+            Place(found.getString("lat").toDouble(), found.getString("lon").toDouble(), found.optString("display_name").split(", ").take(3).joinToString(", "))
+                .also { placeCache[url] = it }
         }
-        if (hit != null) {
-            return Place(hit.getString("lat").toDouble(), hit.getString("lon").toDouble(), hit.optString("display_name").split(", ").take(3).joinToString(", "))
-        }
+        if (hit != null) return hit
         val (lat, lon, name) = geocode(query)
         return Place(lat, lon, name)
     }
@@ -979,53 +989,57 @@ class WatchTools(private val context: Context) {
         val result = FloatArray(2)
         Location.distanceBetween(here.latitude, here.longitude, place.latitude, place.longitude, result)
         val bearing = ((result[1] % 360 + 360) % 360).roundToInt() % 360
+        val precise = context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
         return "${place.name} is ${distance(result[0])} away as the crow flies, bearing $bearing° from true north " +
-            "(${compassPoint(bearing)}) from the wearer. By road it is further. Source: the watch's location" +
-            (if (noteId == null) " and OpenStreetMap." else ".")
+            "(${compassPoint(bearing)}) from the wearer. By road it is further." +
+            (if (precise) "" else " The watch may give only an approximate location (to within about 2 km), so treat short distances as rough.") +
+            " Source: the watch's location" + (if (noteId == null) " and OpenStreetMap (© OpenStreetMap contributors)." else ".")
     }
 
-    private suspend fun navigate(query: String?, noteId: Int?, mode: String): String {
+    /**
+     * Gets navigation ready: finds the best app that will take the request and leaves the screen
+     * to open as [pendingLaunch] once the reply has been spoken, so Claude neither talks over Maps
+     * nor answers from the background.
+     */
+    private fun navigate(query: String?, noteId: Int?, mode: String): String {
         val code = when (mode) {
             "bicycle" -> "b"
             "drive" -> "d"
             else -> "w"
         }
         // A saved place goes as exact coordinates; a name goes to Maps as it is, for Maps to find.
-        val target = if (noteId != null) {
-            val place = destination(null, noteId, null)
-            "${place.latitude},${place.longitude}"
+        val (target, named) = if (noteId != null) {
+            val note = runCatching { notes.all() }.getOrNull()?.firstOrNull { it.id == noteId }
+                ?: throw ToolException("There is no note $noteId.")
+            val lat = note.latitude
+            val lon = note.longitude
+            if (lat == null || lon == null) throw ToolException("Note $noteId was saved without a place.")
+            "%.6f,%.6f".format(Locale.US, lat, lon) to "the place saved with note $noteId"
         } else {
-            query ?: throw ToolException("Say where to: a place, or a saved note.")
+            val name = query ?: throw ToolException("Say where to: a place, or a saved note.")
+            name to name
         }
-        val uri = Uri.parse("google.navigation:q=" + Uri.encode(target) + "&mode=" + code)
-        if (!onScreen()) throw ToolException("The watch screen went off before Maps could be opened; try again with the screen on.")
-        withContext(Dispatchers.Main) {
-            beforeLeaving?.invoke()
-            val maps = Intent(Intent.ACTION_VIEW, uri).setPackage(GOOGLE_MAPS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                context.startActivity(maps)
-            } catch (e: ActivityNotFoundException) {
-                // Another navigation app, or a map showing the place, rather than nothing.
-                try {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (noNavigation: ActivityNotFoundException) {
-                    try {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(target))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    } catch (noMaps: ActivityNotFoundException) {
-                        throw ToolException("No maps app on this watch accepts navigation requests; Google Maps can be installed from the watch's Play Store.")
-                    }
-                }
-            }
-        }
+        val navigation = Uri.parse("google.navigation:q=" + Uri.encode(target, ",") + "&mode=" + code)
+        val pm = context.packageManager
+        val maps = Intent(Intent.ACTION_VIEW, navigation).setPackage(GOOGLE_MAPS)
+        val anyNavigation = Intent(Intent.ACTION_VIEW, navigation)
+        val map = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(target, ",")))
         val how = when (code) {
             "b" -> "cycling"
             "d" -> "driving"
             else -> "walking"
         }
-        return "Asked Google Maps to start $how navigation to ${if (noteId != null) "the place saved with note $noteId" else target}. " +
-            "Maps now shows on the watch; if it found the wrong place, the wearer can change it there."
+        val (intent, result) = when {
+            pm.resolveActivity(maps, 0) != null ->
+                maps to "Google Maps opens with $how navigation to $named as soon as you finish speaking; keep the reply to a sentence."
+            pm.resolveActivity(anyNavigation, 0) != null ->
+                anyNavigation to "A navigation app (not Google Maps) opens with directions to $named as soon as you finish speaking; keep the reply to a sentence."
+            pm.resolveActivity(map, 0) != null ->
+                map to "No app here takes navigation requests, so only a map of $named opens when you finish speaking; say so, briefly."
+            else -> throw ToolException("No maps app on this watch takes navigation requests; Google Maps can be installed from the watch's Play Store.")
+        }
+        pendingLaunch = intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return result + if (noteId == null) " If Maps picks the wrong place, the wearer can change it there." else ""
     }
 
     // ── Notes ───────────────────────────────────────────────
@@ -1152,12 +1166,25 @@ class WatchTools(private val context: Context) {
         }
     }
 
-    /** A JSON list from [url]; Nominatim asks every app to name itself in the User-Agent. */
+    /**
+     * A search on OpenStreetMap's Nominatim, kept to its usage policy: at most one request a
+     * second, results cached (see [placeCache]), and the app named in the User-Agent.
+     */
+    private suspend fun nominatim(url: String): JSONArray = nominatimLock.withLock {
+        val wait = lastNominatim + 1_000 - SystemClock.elapsedRealtime()
+        if (wait > 0) delay(wait)
+        try {
+            getJsonArray(url)
+        } finally {
+            lastNominatim = SystemClock.elapsedRealtime()
+        }
+    }
+
     private suspend fun getJsonArray(url: String): JSONArray = withContext(Dispatchers.IO) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = HTTP_CONNECT_TIMEOUT_MS
             readTimeout = HTTP_READ_TIMEOUT_MS
-            setRequestProperty("User-Agent", "ClaudeWatch/1 (personal Wear OS app)")
+            setRequestProperty("User-Agent", "ClaudeWatch/1 (personal Wear OS app; https://github.com/vcorr/ClaudeWatch)")
         }
         try {
             if (conn.responseCode != 200) throw ToolException("The place search answered HTTP ${conn.responseCode}.")
@@ -1202,6 +1229,8 @@ class WatchTools(private val context: Context) {
 
         /** Everything the tools may need, asked for together with the microphone. */
         fun permissions(): Array<String> = listOfNotNull(
+            // Precise for directions and saved places; the wearer may still choose approximate.
+            Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_CALENDAR,
             heartRatePermission(),

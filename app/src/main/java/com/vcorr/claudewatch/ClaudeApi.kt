@@ -47,8 +47,8 @@ object ClaudeApi {
             "the wearer confirms. Use web search only " +
             "when the wearer asks you to search or look something up; otherwise answer from what you " +
             "know, and if current information would help, say so briefly and offer to look it up. " +
-            "Don't read out web addresses. Never estimate distances, directions or positions " +
-            "yourself; use the tools. When asked what you can do, or how this watch app works, " +
+            "Don't read out web addresses. Never estimate how far or which way a place is from " +
+            "the wearer, or where the wearer is; use get_location and get_directions. When asked what you can do, or how this watch app works, " +
             "check get_claudewatch_help and answer briefly with a few examples suited to the question."
 
     // The conversation's language. Tool results and these instructions stay in English; Claude

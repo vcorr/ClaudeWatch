@@ -488,6 +488,8 @@ class MainActivity : Activity() {
     private fun ask(text: String) {
         val token = turnToken
         cancelClose()
+        // Anything a previous turn left to open is stale now.
+        watchTools.pendingLaunch = null
         liveReply = null
         toolLabel = null
         conversation.addUser(text)
@@ -582,6 +584,21 @@ class MainActivity : Activity() {
     /** The reply has been said: listen for a follow-up, if the wearer is still here. */
     private fun onSpoken(token: Int) {
         if (token != turnToken) return
+        // A tool left another app to open after the reply, such as Maps' navigation.
+        watchTools.pendingLaunch?.let { intent ->
+            watchTools.pendingLaunch = null
+            if (foreground) {
+                leavingForOtherAppUntil = SystemClock.uptimeMillis() + LEAVING_LAPSE_MS
+                try {
+                    startActivity(intent)
+                    goIdle(null)
+                } catch (e: Exception) {
+                    leavingForOtherAppUntil = 0L
+                    goIdle("Couldn't open navigation", problem = true)
+                }
+                return
+            }
+        }
         if (!foreground) {
             goIdle(null)
             return

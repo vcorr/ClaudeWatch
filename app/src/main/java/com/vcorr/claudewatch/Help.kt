@@ -22,7 +22,12 @@ object Help {
             "OFF (granted once over ADB with a command the diagnostics show; long-press the microphone)"
         }
         val language = if (Language.finnish) "Finnish" else "English, because the watch can't both hear and speak Finnish just now"
-        val location = if (context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) "on" else on(Manifest.permission.ACCESS_COARSE_LOCATION)
+        val location = when {
+            context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) -> "on, precise"
+            context.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ->
+                "on, approximate only (to about 2 km; for directions and saved places choose Precise in the watch's Settings, under Apps, ClaudeWatch, Permissions)"
+            else -> on(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
 
         return """
 ClaudeWatch $version: a voice chat with Claude (Anthropic's Claude Haiku model) on the wearer's Galaxy Watch, a personal sideloaded app, not an official Anthropic or Samsung product. The conversation is in $language.
