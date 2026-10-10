@@ -1,6 +1,6 @@
 # ClaudeWatch
 
-Voice chat with Claude (Haiku 4.5) on a Samsung Galaxy Watch. Open it, speak, and Claude answers aloud. It can also read the watch, act on it, and look a few things up. One user, sideloaded, using your own Anthropic API key. Plans and decisions are in [`docs/PLAN.md`](docs/PLAN.md).
+Voice chat with Claude (Haiku 5.5) on a Samsung Galaxy Watch. Open it, speak, and Claude answers aloud. It can also read the watch, act on it, and look a few things up. One user, sideloaded, using your own Anthropic API key. Plans and decisions are in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## What you can ask
 

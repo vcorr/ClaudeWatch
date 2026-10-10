@@ -158,7 +158,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 |---|---|---|
 | Key handling | Private file via `run-as` and stdin; never in source or APK | Public repo; no exported surface |
 | Speech in | `SpeechInput`: `SpeechRecognizer` or `RecognizerIntent`, chosen by the probe; Vosk last | `RecognizerIntent` is the documented Wear OS route; `SpeechRecognizer` has a known Galaxy Watch 4 failure ([flutter#130576](https://github.com/flutter/flutter/issues/130576)) |
-| Model | Haiku 4.5, `max_tokens` 1,024 | Fastest and cheapest ($1 / $5 per million input / output tokens); brevity from the prompt, not the cap |
+| Model | Haiku 5.5 (from 10 Oct 2026; Haiku 4.5 before), adaptive thinking at `low` effort, `max_tokens` 2,048 | Cheapest Claude: $0.10 / $0.50 per million input / output tokens for prompts up to 100K tokens, against Haiku 4.5's $1 / $5 ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)); its tokenizer counts about 30% more tokens for the same text. Low effort keeps simple answers quick; thinking counts towards the cap, hence 2,048. Thinking blocks are passed back unchanged within a tool loop and never stored across turns |
 | HTTP | Own client in `core` | SDK not documented for Android; testability |
 | Storage | `AtomicFile` JSON | Small data; crash-safe |
 | UI | Views for now; Compose for Wear OS Material 3 after Phase 3 | Voice first; the voice screen is small, so rebuilding it later is cheap |
@@ -170,7 +170,7 @@ Lowering the wrist to listen turns the screen off; the activity stops and the wa
 | Phone companion | Removed (2 Oct 2026), with the watch's Data Layer listener | The browser key page replaced it, and Android's unverified-developer block made sideloading it wait 24 hours |
 | Key entry | A one-page form served by the watch on the local Wi-Fi (PIN, five-attempt lockout, only while the setup screen shows); adb remains an alternative | Owner wants phone-only setup; Android's unverified-developer block (2026) makes sideloading the phone app wait 24 hours, while ADB installs to the watch are exempt ([Android FAQ](https://developer.android.com/developer-verification/guides/faq)) |
 | Versioning | `ClaudeWatch-<claudewatch.version>.<CI build number>` (e.g. 0.4.41) for the artifact, the APK file, `versionName` and the diagnostics screen; `versionCode` is the build number | One name to match a download to what's on the watch; rising codes let Android treat builds as updates |
-| Prompt caching | Not used | Conversations rarely pass Haiku 4.5's 4,096-token minimum |
+| Prompt caching | The tool definitions, cached with a breakpoint on the last one | Haiku 5.5 caches from 512 tokens (Haiku 4.5 needed 4,096); the tools are stable and sent on every round, while the system prompt after them carries the time |
 
 ## Owner's answers (1 October 2026)
 

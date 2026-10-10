@@ -24,10 +24,15 @@ import java.util.TimeZone
 object ClaudeApi {
 
     private const val ENDPOINT = "https://api.anthropic.com/v1/messages"
-    private const val MODEL = "claude-haiku-4-5"
+    private const val MODEL = "claude-haiku-5-5"
 
-    // Brevity comes from the prompt; the cap only stops runaway replies.
-    private const val MAX_TOKENS = 1024
+    // Haiku 5.5 thinks adaptively, and at low effort skips thinking on simple requests: quick for
+    // the voice, with some thought where a question needs it.
+    private const val EFFORT = "low"
+
+    // Brevity comes from the prompt; the cap only stops runaway replies. Thinking counts towards
+    // it, so it leaves room for some.
+    private const val MAX_TOKENS = 2048
 
     private const val SYSTEM_PROMPT =
         "You are Claude, talking with someone through their smartwatch. Your replies are read aloud " +
@@ -119,7 +124,12 @@ object ClaudeApi {
         }
         val toolList = JSONArray()
         if (tools != null) {
-            for (i in 0 until tools.definitions.length()) toolList.put(tools.definitions.get(i))
+            for (i in 0 until tools.definitions.length()) {
+                val tool = tools.definitions.getJSONObject(i)
+                // The watch tools never change, so cache them (the system prompt after them carries
+                // the time): each tool round and follow-up then starts from the cache.
+                toolList.put(if (i == tools.definitions.length() - 1) JSONObject(tool.toString()).put("cache_control", JSONObject().put("type", "ephemeral")) else tool)
+            }
         }
         if (withSearch) {
             toolList.put(
@@ -198,6 +208,8 @@ object ClaudeApi {
             .put("system", system)
             .put("messages", messages)
             .put("stream", true)
+            .put("thinking", JSONObject().put("type", "adaptive"))
+            .put("output_config", JSONObject().put("effort", EFFORT))
         if (tools.length() > 0) body.put("tools", tools)
 
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
@@ -246,8 +258,8 @@ object ClaudeApi {
                         val index = event.getInt("index")
                         val block = event.getJSONObject("content_block")
                         blocks[index] = block
-                        // Text after a tool call or search result is a new sentence.
-                        if (block.optString("type") != "text") onText(" ")
+                        // Text after a tool call or search result is a new sentence; thinking says nothing aloud.
+                        if (block.optString("type") !in setOf("text", "thinking", "redacted_thinking")) onText(" ")
                         // A tool call's input arrives as pieces of JSON, put together at the block's end.
                         if (block.optString("type").endsWith("tool_use")) inputs[index] = StringBuilder()
                     }
@@ -262,6 +274,10 @@ object ClaudeApi {
                                 if (text.isNotEmpty()) onText(text)
                             }
                             "input_json_delta" -> inputs[index]?.append(delta.optString("partial_json"))
+                            // Thinking goes back unchanged with tool results, its signature included;
+                            // it is never spoken, shown or stored.
+                            "thinking_delta" -> block.put("thinking", block.optString("thinking") + delta.optString("thinking"))
+                            "signature_delta" -> block.put("signature", delta.optString("signature"))
                             "citations_delta" -> {
                                 val citations = block.optJSONArray("citations") ?: JSONArray().also { block.put("citations", it) }
                                 delta.optJSONObject("citation")?.let { citations.put(it) }
